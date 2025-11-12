@@ -24,7 +24,7 @@ void center_init(void) {
 // MAIN LOOP
 // ============================================================================
 
-void center_run(EventRingBuffer* from_receiver_ring, RoutingTable* routing_table) {
+void center_run(EventRingBuffer* from_receiver_ring, RoutingTable* routing_table, ResponseRingBuffer* kernel_to_user_ring) {
     kprintf("[CENTER] Starting main loop...\n");
 
     Event event;
@@ -35,7 +35,7 @@ void center_run(EventRingBuffer* from_receiver_ring, RoutingTable* routing_table
         if (event_ring_pop(from_receiver_ring, &event)) {
             // Обрабатываем: определяем маршрут и создаём routing entry
             // center_process_event() увеличит счетчик внутри
-            center_process_event(&event, routing_table);
+            center_process_event(&event, routing_table, kernel_to_user_ring);
 
             // NOTE: Guide будет polling routing table и обнаружит новый entry
         } else {

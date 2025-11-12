@@ -133,7 +133,7 @@ void eventdriven_process_one_iteration(void) {
 
     // 2. Center: забираем из receiver→center, проверяем Security и определяем маршрут
     if (event_ring_pop(global_event_system.receiver_to_center_ring, &event)) {
-        center_process_event(&event, global_event_system.routing_table);
+        center_process_event(&event, global_event_system.routing_table, global_event_system.kernel_to_user_ring);
     }
 
     // 3. Guide: сканируем routing table и раздаём по deck'ам

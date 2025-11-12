@@ -421,7 +421,7 @@ load_kernel_simple:
     jc .use_chs          ; Если не поддерживается, используем CHS
 
     ; Используем INT 13h Extensions (LBA)
-    ; Загружаем 200 секторов (100KB) начиная с LBA 10
+    ; Загружаем 250 секторов (125KB) начиная с LBA 10
 
     ; Часть 1: 127 секторов
     mov si, dap1
@@ -430,7 +430,7 @@ load_kernel_simple:
     int 0x13
     jc .disk_error
 
-    ; Часть 2: 73 сектора
+    ; Часть 2: 123 сектора (remaining: 250 - 127 = 123)
     mov si, dap2
     mov ah, 0x42
     mov dl, 0x80
