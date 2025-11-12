@@ -1,6 +1,7 @@
 #include "klib.h"
 #include "vga.h"
 #include "io.h"
+#include "serial.h"
 #include <stdarg.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -277,6 +278,15 @@ int kputnl(void) {
 
 // ========== Форматированный вывод ==========
 void kputchar(char c) {
+    // Output to serial port (for debugging with -serial stdio)
+    if (c == '\n') {
+        serial_putchar('\r');
+        serial_putchar('\n');
+    } else {
+        serial_putchar(c);
+    }
+
+    // Output to VGA
     if (c == '\n') {
         kputnl();
     } else if (c == '\r') {
