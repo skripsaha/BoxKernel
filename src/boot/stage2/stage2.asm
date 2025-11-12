@@ -18,19 +18,19 @@
 ; 0x7C00      - Stage1 (512 bytes)
 ; 0x8000      - Stage2 (4096 bytes) - THIS CODE
 ; 0x9000      - Boot info for kernel (256 bytes)
-; 0x10000     - Kernel (136192 bytes = 266 sectors = 133KB)
-; 0x31400     - End of kernel
-; 0x31400     - BSS section (3.9MB uninitialized data)
-; 0x3EF000    - End of BSS (~4MB mark)
+; 0x10000     - Kernel (143360 bytes = 280 sectors = 140KB)
+; 0x33000     - End of kernel
+; 0x33000     - BSS section (3.9MB uninitialized data)
+; 0x3F0000    - End of BSS (~4MB mark)
 ; 0x500000    - Page tables (16KB: PML4, PDPT, PD, PT) - MOVED ABOVE BSS!
 ; 0x510000    - Stack for 32/64-bit modes (grows downward) - MOVED ABOVE BSS!
 
 ; === CONSTANTS ===
 KERNEL_LOAD_ADDR      equ 0x10000
 KERNEL_SECTOR_START   equ 10
-KERNEL_SECTOR_COUNT   equ 266
-KERNEL_SIZE_BYTES     equ 136192        ; 266 * 512
-KERNEL_END_ADDR       equ 0x31400       ; 0x10000 + 0x21400 (136192 bytes)
+KERNEL_SECTOR_COUNT   equ 280
+KERNEL_SIZE_BYTES     equ 143360        ; 280 * 512
+KERNEL_END_ADDR       equ 0x33000       ; 0x10000 + 0x23000 (143360 bytes)
 
 PAGE_TABLE_BASE       equ 0x500000      ; MOVED: Above kernel BSS (was 0x70000)
 E820_MAP_ADDR         equ 0x500         ; Low memory (safe after BIOS data area)
@@ -437,7 +437,7 @@ load_kernel_simple:
     int 0x13
     jc .disk_error
 
-    ; Часть 3: 12 секторов (remaining: 266 - 127 - 127 = 12)
+    ; Часть 3: 26 секторов (remaining: 280 - 127 - 127 = 26)
     mov si, dap3
     mov ah, 0x42
     mov dl, 0x80
@@ -787,7 +787,7 @@ align 4
 dap3:
     db 0x10             ; DAP size (16 bytes)
     db 0                ; Reserved
-    dw 12               ; Sector count: 12 (266 - 127 - 127 = 12)
+    dw 26               ; Sector count: 26 (280 - 127 - 127 = 26)
     dw 0x0000           ; Offset
     dw 0x2FC0           ; Segment (0x2FC0:0x0000 = 0x2FC00 physical)
     dq 264              ; Starting LBA sector: 264 (10 + 127 + 127)
@@ -800,8 +800,8 @@ msg_e820_success      db '[OK] E820 memory map created', 13, 10, 0
 msg_e820_fail         db '[WARN] E820 failed, using fallback', 13, 10, 0
 msg_memory_fallback   db '[OK] Fallback memory detection', 13, 10, 0
 msg_memory_error      db '[ERROR] Memory detection failed!', 13, 10, 0
-msg_loading_kernel    db 'Loading kernel (266 sectors)...', 13, 10, 0
-msg_kernel_loaded     db '[OK] Kernel loaded (133KB)', 13, 10, 0
+msg_loading_kernel    db 'Loading kernel (280 sectors)...', 13, 10, 0
+msg_kernel_loaded     db '[OK] Kernel loaded (140KB)', 13, 10, 0
 msg_kernel_empty      db '[WARN] Kernel appears empty', 13, 10, 0
 msg_disk_error        db '[ERROR] Disk read failed!', 13, 10, 0
 msg_long_mode_ok      db '[OK] CPU supports 64-bit mode', 13, 10, 0
