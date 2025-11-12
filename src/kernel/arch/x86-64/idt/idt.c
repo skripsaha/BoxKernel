@@ -3,6 +3,8 @@
 #include "klib.h"
 #include "io.h"
 #include "pic.h"  // ИСПРАВЛЕНО: добавлен include
+#include "pit.h"  // PIT timer driver
+#include "task.h" // Task scheduler
 
 static idt_entry_t idt[IDT_ENTRIES];
 static idt_descriptor_t idt_desc;
@@ -186,10 +188,16 @@ void irq_handler(interrupt_frame_t* frame) {
     // Обработчики для основных IRQ
     switch(frame->vector) {
         case IRQ_TIMER:
+            // Increment PIT tick counter
+            pit_tick();
+
+            // Run task scheduler (switch tasks if needed)
+            task_scheduler_tick();
+
             // Таймер - уменьшили частоту логирования
             if (irq_count[0] % 1000 == 0) {  // Каждые ~55 секунд вместо 5.5
                 uint64_t minutes = irq_count[0] > 1100 ? irq_count[0] / 1100 : 0;
-                kprintf("%[H]Timer: %llu ticks (~%llu minutes)%[D]\n", 
+                kprintf("%[H]Timer: %llu ticks (~%llu minutes)%[D]\n",
                        irq_count[0], minutes);
             }
             break;

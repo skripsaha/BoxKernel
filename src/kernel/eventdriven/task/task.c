@@ -204,6 +204,7 @@ Task* task_spawn_with_args(const char* name, void* entry_point, void* args, uint
     }
     task->stack_size = TASK_STACK_SIZE;
     task->entry_point = entry_point;
+    task->args = args;  // Save arguments
 
     // TODO: Create separate page table for task
     // For now, use kernel page table
@@ -601,6 +602,27 @@ void task_scheduler_tick(void) {
     }
 
     spin_unlock(&task_table_lock);
+
+    // SIMPLE EXECUTOR: Run next ready task (cooperative multitasking)
+    // Note: This is a simplified approach without full context switching
+    // Each task runs to completion or yields voluntarily
+    static uint32_t scheduler_tick_count = 0;
+    scheduler_tick_count++;
+
+    // Run scheduler every 10 ticks (~100ms at 100Hz)
+    if (scheduler_tick_count % 10 == 0) {
+        Task* task = task_scheduler_next();
+        if (task && task->state == TASK_STATE_RUNNING && task->entry_point) {
+            // Run task function (simplified execution without context switch)
+            // In a real OS, this would do full context switching
+            // Cast entry_point to function pointer: void (*)(void*)
+            void (*task_func)(void*) = (void (*)(void*))task->entry_point;
+            task_func(task->args);
+
+            // Mark task as completed after running
+            task->state = TASK_STATE_PROCESSING;
+        }
+    }
 }
 
 // ============================================================================
