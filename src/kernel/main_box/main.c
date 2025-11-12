@@ -20,13 +20,6 @@ extern uint8_t user_experience_level;
 
 static uint32_t rand_seed = 912346;
 
-// TEMPORARY FIX: Hardcoded E820 map for testing (const to place in .rodata, not BSS)
-// TODO: Fix E820 map loading from bootloader
-const e820_entry_t temp_e820[] = {
-    {.base = 0x0, .length = 0x9FC00, .type = E820_USABLE, .acpi = 0},         // 0-639KB usable
-    {.base = 0x100000, .length = 0x7F00000, .type = E820_USABLE, .acpi = 0},  // 1MB-128MB usable
-};
-
 uint32_t simple_rand(){
     // Fixed: use proper 32-bit LCG parameters (from Numerical Recipes)
     rand_seed = (1103515245U * rand_seed + 12345U) & 0x7FFFFFFF;
@@ -54,7 +47,11 @@ void asm_stop(){
 // }
 
 
-void kernel_main(void) {
+// kernel_main receives parameters from bootloader via kernel_entry.asm:
+// RDI = E820 map address (0x500)
+// RSI = E820 entry count
+// RDX = available memory start (0x100000)
+void kernel_main(e820_entry_t* e820_map, uint64_t e820_count, uint64_t mem_start) {
     // Initialize serial port FIRST for early debugging
     serial_init();
     serial_print("BoxOS: Serial port initialized\n");
@@ -71,9 +68,9 @@ void kernel_main(void) {
     mem_init();
     kprintf("%[S] Memory allocator initialized%[D]\n");
 
-    // Use hardcoded E820 map (const to avoid BSS zeroing)
-    e820_set_entries((e820_entry_t*)temp_e820, 2);
-    kprintf("%[S] E820 map initialized (hardcoded for testing)%[D]\n");
+    // Use E820 map from bootloader (passed via RDI/RSI)
+    e820_set_entries(e820_map, e820_count);
+    kprintf("%[S] E820 map initialized (%lu entries from bootloader)%[D]\n", e820_count);
 
     pmm_init();
     kprintf("%[S] Physical memory manager initialized%[D]\n");

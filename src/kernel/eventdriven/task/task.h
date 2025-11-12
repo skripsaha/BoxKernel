@@ -80,6 +80,22 @@ typedef struct {
 
 #define TASK_NAME_MAX 32
 #define TASK_STACK_SIZE (16 * 1024)  // 16KB stack per task
+#define TASK_MESSAGE_QUEUE_SIZE 16   // Max messages per task
+
+// === MESSAGE QUEUE ===
+typedef struct {
+    uint64_t sender_id;            // ID of sender task
+    uint64_t message_type;         // Type of message
+    uint64_t data[4];              // Message payload (32 bytes)
+} TaskMessage;
+
+typedef struct {
+    TaskMessage messages[TASK_MESSAGE_QUEUE_SIZE];
+    uint32_t head;                 // Read position
+    uint32_t tail;                 // Write position
+    uint32_t count;                // Number of messages
+    uint32_t lock;                 // Spinlock
+} TaskMessageQueue;
 
 typedef struct Task {
     // === IDENTITY ===
@@ -120,8 +136,8 @@ typedef struct Task {
     uint64_t last_progress_time;   // RDTSC of last progress
 
     // === COMMUNICATION ===
-    void* message_queue;           // Pointer to task's message queue
-    uint64_t pending_messages;     // Number of pending messages
+    TaskMessageQueue* message_queue;  // Pointer to task's message queue
+    uint64_t pending_messages;        // Number of pending messages
 
     // === LINKED LIST ===
     struct Task* next;             // Next task in scheduler queue
