@@ -1,184 +1,165 @@
 #include "deck_interface.h"
 #include "klib.h"
+#include "../task/task.h"  // ✅ NEW: Task system integration
 
 // ============================================================================
-// OPERATIONS DECK - Process & IPC Operations
+// OPERATIONS DECK - Task & IPC Operations
+// ============================================================================
+//
+// Now using the revolutionary Task system instead of heavy processes!
+// Tasks are lightweight, energy-driven, and self-regulating.
 // ============================================================================
 
-// Process control block (заглушка - в реальности это полная структура)
-typedef struct {
-    uint64_t pid;
-    uint64_t parent_pid;
-    char name[64];
-    uint64_t state;  // RUNNING, SLEEPING, ZOMBIE, etc.
-    void* page_table;
-    uint64_t rsp;    // Stack pointer
-    uint64_t rip;    // Instruction pointer
-} ProcessControlBlock;
-
-// Глобальный счетчик PID
-static volatile uint64_t next_pid = 1;
-
 // ============================================================================
-// PROCESS OPERATIONS
-// ============================================================================
-
-static ProcessControlBlock* process_create(const char* name, void* entry_point) {
-    // TODO: Интеграция с реальным планировщиком и VMM
-
-    ProcessControlBlock* pcb = (ProcessControlBlock*)kmalloc(sizeof(ProcessControlBlock));
-    if (!pcb) {
-        kprintf("[OPERATIONS] Failed to allocate PCB\n");
-        return 0;
-    }
-
-    pcb->pid = atomic_increment_u64(&next_pid);
-    pcb->parent_pid = 0;  // TODO: получить текущий PID
-
-    // Копируем имя
-    int i = 0;
-    while (name[i] && i < 63) {
-        pcb->name[i] = name[i];
-        i++;
-    }
-    pcb->name[i] = 0;
-
-    pcb->state = 1;  // RUNNING
-    pcb->page_table = 0;  // TODO: создать page table
-    pcb->rsp = 0;  // TODO: выделить stack
-    pcb->rip = (uint64_t)entry_point;
-
-    kprintf("[OPERATIONS] Created process '%s' with PID=%lu\n", name, pcb->pid);
-
-    return pcb;
-}
-
-static int process_kill(uint64_t pid) {
-    // TODO: Найти процесс в таблице и убить
-    kprintf("[OPERATIONS] Killed process PID=%lu\n", pid);
-    return 0;  // Success
-}
-
-static int process_wait(uint64_t pid) {
-    // TODO: Ждать завершения процесса
-    kprintf("[OPERATIONS] Waiting for process PID=%lu\n", pid);
-    return 0;
-}
-
-static int process_getpid(void) {
-    // TODO: Вернуть текущий PID
-    return 1;  // Placeholder
-}
-
-// ============================================================================
-// IPC OPERATIONS (STUBS - для v1)
-// ============================================================================
-
-static int ipc_send(uint64_t target_pid, void* data, uint64_t size) {
-    kprintf("[OPERATIONS] IPC send to PID=%lu, size=%lu bytes - STUB\n", target_pid, size);
-    return 0;
-}
-
-static int ipc_recv(uint64_t* from_pid, void* buffer, uint64_t max_size) {
-    kprintf("[OPERATIONS] IPC recv - STUB\n");
-    return 0;
-}
-
-// ============================================================================
-// PROCESSING FUNCTION
+// PROCESSING FUNCTION - Task Operations
 // ============================================================================
 
 int operations_deck_process(RoutingEntry* entry) {
     Event* event = &entry->event_copy;
 
     switch (event->type) {
-        // === PROCESS OPERATIONS ===
+        // === TASK OPERATIONS (✅ Real implementation) ===
         case EVENT_PROC_CREATE: {
-            // Payload: [name_len:4][name:...][entry_point:8]
+            // Payload: [name_len:4][name:...][entry_point:8][energy:1]
             uint32_t name_len = *(uint32_t*)event->data;
             const char* name = (const char*)(event->data + 4);
             void* entry_point = *(void**)(event->data + 4 + name_len);
+            uint8_t energy = (event->data[4 + name_len + 8] != 0) ?
+                              event->data[4 + name_len + 8] : 50;  // Default energy = 50
 
-            ProcessControlBlock* pcb = process_create(name, entry_point);
+            // ✅ Create task using new Task system
+            Task* task = task_spawn(name, entry_point, energy);
 
-            if (pcb) {
-                kprintf("[OPERATIONS] Event %lu: created process PID=%lu\n",
-                        event->id, pcb->pid);
-                deck_complete(entry, DECK_PREFIX_OPERATIONS, pcb);
+            if (task) {
+                kprintf("[OPERATIONS] ✅ Event %lu: spawned task '%s' (ID=%lu, energy=%u)\n",
+                        event->id, name, task->task_id, energy);
+
+                // Return task ID as result
+                uint64_t* result = (uint64_t*)kmalloc(sizeof(uint64_t));
+                *result = task->task_id;
+                deck_complete(entry, DECK_PREFIX_OPERATIONS, result);
                 return 1;
             } else {
-                kprintf("[OPERATIONS] Event %lu: failed to create process\n",
-                        event->id);
+                kprintf("[OPERATIONS] ❌ Event %lu: failed to spawn task '%s'\n",
+                        event->id, name);
                 deck_error(entry, DECK_PREFIX_OPERATIONS, 1);
                 return 0;
             }
         }
 
         case EVENT_PROC_EXIT: {
+            // Current task exits
             uint64_t exit_code = *(uint64_t*)event->data;
-            kprintf("[OPERATIONS] Event %lu: process exit with code %lu\n",
-                    event->id, exit_code);
+            uint64_t task_id = task_get_current_id();
+
+            kprintf("[OPERATIONS] Event %lu: task %lu exiting with code %lu\n",
+                    event->id, task_id, exit_code);
+
+            if (task_id > 0) {
+                task_kill(task_id);
+            }
+
             deck_complete(entry, DECK_PREFIX_OPERATIONS, 0);
             return 1;
         }
 
         case EVENT_PROC_KILL: {
-            uint64_t pid = *(uint64_t*)event->data;
-            process_kill(pid);
-            deck_complete(entry, DECK_PREFIX_OPERATIONS, 0);
-            kprintf("[OPERATIONS] Event %lu: killed PID=%lu\n", event->id, pid);
-            return 1;
+            // Kill specific task
+            uint64_t task_id = *(uint64_t*)event->data;
+
+            int ret = task_kill(task_id);
+            if (ret == 0) {
+                kprintf("[OPERATIONS] ✅ Event %lu: killed task %lu\n", event->id, task_id);
+                deck_complete(entry, DECK_PREFIX_OPERATIONS, 0);
+                return 1;
+            } else {
+                kprintf("[OPERATIONS] ❌ Event %lu: failed to kill task %lu\n",
+                        event->id, task_id);
+                deck_error(entry, DECK_PREFIX_OPERATIONS, 2);
+                return 0;
+            }
         }
 
         case EVENT_PROC_WAIT: {
-            uint64_t pid = *(uint64_t*)event->data;
-            process_wait(pid);
-            deck_complete(entry, DECK_PREFIX_OPERATIONS, 0);
-            kprintf("[OPERATIONS] Event %lu: waited for PID=%lu\n", event->id, pid);
-            return 1;
+            // Sleep task for specified time
+            // Payload: [task_id:8][milliseconds:8]
+            uint64_t task_id = *(uint64_t*)event->data;
+            uint64_t milliseconds = *(uint64_t*)(event->data + 8);
+
+            int ret = task_sleep(task_id, milliseconds);
+            if (ret == 0) {
+                kprintf("[OPERATIONS] ✅ Event %lu: task %lu sleeping for %lu ms\n",
+                        event->id, task_id, milliseconds);
+                deck_complete(entry, DECK_PREFIX_OPERATIONS, 0);
+                return 1;
+            } else {
+                deck_error(entry, DECK_PREFIX_OPERATIONS, 3);
+                return 0;
+            }
         }
 
         case EVENT_PROC_GETPID: {
-            int pid = process_getpid();
-            deck_complete(entry, DECK_PREFIX_OPERATIONS, 0);
-            kprintf("[OPERATIONS] Event %lu: getpid() = %d\n", event->id, pid);
+            // Get current task ID
+            uint64_t task_id = task_get_current_id();
+
+            uint64_t* result = (uint64_t*)kmalloc(sizeof(uint64_t));
+            *result = task_id;
+
+            deck_complete(entry, DECK_PREFIX_OPERATIONS, result);
+            kprintf("[OPERATIONS] Event %lu: get_task_id() = %lu\n", event->id, task_id);
             return 1;
         }
 
         case EVENT_PROC_SIGNAL: {
-            // Payload: [pid:8][signal:4]
-            uint64_t pid = *(uint64_t*)event->data;
-            uint32_t signal = *(uint32_t*)(event->data + 8);
-            kprintf("[OPERATIONS] Event %lu: signal %u to PID=%lu\n",
-                    event->id, signal, pid);
-            deck_complete(entry, DECK_PREFIX_OPERATIONS, 0);
-            return 1;
+            // Task control: pause/resume/boost/throttle
+            // Payload: [task_id:8][operation:4][value:4]
+            uint64_t task_id = *(uint64_t*)event->data;
+            uint32_t operation = *(uint32_t*)(event->data + 8);
+            uint32_t value = *(uint32_t*)(event->data + 12);
+
+            int ret = -1;
+            switch (operation) {
+                case 0:  // Pause
+                    ret = task_pause(task_id);
+                    kprintf("[OPERATIONS] Task %lu paused\n", task_id);
+                    break;
+                case 1:  // Resume
+                    ret = task_resume(task_id);
+                    kprintf("[OPERATIONS] Task %lu resumed\n", task_id);
+                    break;
+                case 2:  // Boost energy
+                    ret = task_boost(task_id, (uint8_t)value);
+                    kprintf("[OPERATIONS] Task %lu boosted by %u\n", task_id, value);
+                    break;
+                case 3:  // Throttle
+                    ret = task_throttle(task_id, (uint8_t)value);
+                    kprintf("[OPERATIONS] Task %lu throttled by %u\n", task_id, value);
+                    break;
+                case 4:  // Wake up
+                    ret = task_wake(task_id);
+                    kprintf("[OPERATIONS] Task %lu woken up\n", task_id);
+                    break;
+                default:
+                    kprintf("[OPERATIONS] ❌ Unknown task operation %u\n", operation);
+                    break;
+            }
+
+            if (ret == 0) {
+                deck_complete(entry, DECK_PREFIX_OPERATIONS, 0);
+                return 1;
+            } else {
+                deck_error(entry, DECK_PREFIX_OPERATIONS, 4);
+                return 0;
+            }
         }
 
-        // === IPC OPERATIONS (STUBS) ===
-        case EVENT_IPC_SEND: {
-            // Payload: [target_pid:8][size:8][data:...]
-            uint64_t target_pid = *(uint64_t*)event->data;
-            uint64_t size = *(uint64_t*)(event->data + 8);
-            void* data = event->data + 16;
-
-            ipc_send(target_pid, data, size);
-            deck_complete(entry, DECK_PREFIX_OPERATIONS, 0);
-            kprintf("[OPERATIONS] Event %lu: IPC send to PID=%lu\n",
-                    event->id, target_pid);
-            return 1;
-        }
-
-        case EVENT_IPC_RECV: {
-            kprintf("[OPERATIONS] Event %lu: IPC recv - STUB\n", event->id);
-            deck_complete(entry, DECK_PREFIX_OPERATIONS, 0);
-            return 1;
-        }
-
+        // === IPC OPERATIONS (TODO - будет в следующей версии) ===
+        case EVENT_IPC_SEND:
+        case EVENT_IPC_RECV:
         case EVENT_IPC_SHM_CREATE:
         case EVENT_IPC_SHM_ATTACH:
         case EVENT_IPC_PIPE_CREATE: {
-            kprintf("[OPERATIONS] Event %lu: IPC operation (type=%d) - STUB\n",
+            kprintf("[OPERATIONS] Event %lu: IPC operation (type=%d) - TODO\n",
                     event->id, event->type);
             deck_complete(entry, DECK_PREFIX_OPERATIONS, 0);
             return 1;
@@ -186,7 +167,7 @@ int operations_deck_process(RoutingEntry* entry) {
 
         default:
             kprintf("[OPERATIONS] Unknown event type %d\n", event->type);
-            deck_error(entry, DECK_PREFIX_OPERATIONS, 2);
+            deck_error(entry, DECK_PREFIX_OPERATIONS, 5);
             return 0;
     }
 }

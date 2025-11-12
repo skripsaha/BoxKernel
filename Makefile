@@ -38,8 +38,8 @@ QEMU     = qemu-system-x86_64
 #   Sectors 2-10 : Stage2 (9 sectors = 4608 bytes)
 #   Sectors 11+  : Kernel (250 sectors = 128000 bytes = 125KB)
 STAGE2_SECTORS      = 9
-KERNEL_SECTORS      = 250
-KERNEL_MAX_BYTES    = 128000    # 250 * 512
+KERNEL_SECTORS      = 252
+KERNEL_MAX_BYTES    = 129024    # 252 * 512
 KERNEL_START_SECTOR = 10
 
 ASMFLAGS       =  -g -f bin

@@ -10,6 +10,7 @@
 #include "pic.h"
 #include "ata.h"
 #include "tagfs.h"
+#include "task.h"
 #include "eventdriven_system.h"
 #include "eventdriven_demo.h"
 
@@ -72,6 +73,11 @@ void kernel_main(void) {
 
     tagfs_init();
     kprintf("%[S] TagFS filesystem initialized%[D]\n");
+
+    // === TASK SYSTEM INITIALIZATION ===
+    kprintf("\n%[H]=== Initializing Task System ===%[D]\n");
+    task_system_init();
+    kprintf("%[S] Task system initialized%[D]\n");
 
     // === ТЕСТ GDT ===
     kprintf("\n%[H]=== Step 1: GDT Setup ===%[D]\n");
