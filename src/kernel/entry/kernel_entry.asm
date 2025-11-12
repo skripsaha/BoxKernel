@@ -30,19 +30,14 @@ _start:
     mov fs, ax
     mov gs, ax
    
-    ; Настройка стека
-    mov rsp, 0x90000
+    ; Настройка стека (moved above BSS to 0x510000)
+    mov rsp, 0x510000
     mov rbp, rsp
     
     ; Еще одно отладочное сообщение
     mov al, 'S'
     mov dx, 0x3f8
     out dx, al
-   
-    ; Подготовка параметров для ядра
-    mov rdi, 0x90000             ; Адрес e820 карты
-    movzx rsi, word [0x8FFE]     ; Размер e820 карты в байтах
-    mov rdx, 0x100000            ; Начало доступной памяти (1MB)
 
     mov al, 'M'
     mov dx, 0x3f8
@@ -61,6 +56,11 @@ _start:
     mov al, 'B'
     mov dx, 0x3f8
     out dx, al
+
+    ; Подготовка параметров для ядра (ПОСЛЕ очистки BSS!)
+    mov rdi, 0x500               ; Адрес e820 карты (обновлен с 0x90000)
+    movzx rsi, word [0x4FE]      ; Кол-во записей E820 (обновлен с 0x8FFE)
+    mov rdx, 0x100000            ; Начало доступной памяти (1MB)
 
     ; call pick_user_experience
 

@@ -18,23 +18,25 @@
 ; 0x7C00      - Stage1 (512 bytes)
 ; 0x8000      - Stage2 (4096 bytes) - THIS CODE
 ; 0x9000      - Boot info for kernel (256 bytes)
-; 0x10000     - Kernel (102400 bytes = 200 sectors = 100KB)
-; 0x29000     - End of kernel
-; 0x70000     - Page tables (16KB: PML4, PDPT, PD, PT)
-; 0x90000     - Stack for 32/64-bit modes (grows downward)
+; 0x10000     - Kernel (128000 bytes = 250 sectors = 125KB)
+; 0x2F400     - End of kernel
+; 0x2F400     - BSS section (3.9MB uninitialized data)
+; 0x3EF000    - End of BSS (~4MB mark)
+; 0x500000    - Page tables (16KB: PML4, PDPT, PD, PT) - MOVED ABOVE BSS!
+; 0x510000    - Stack for 32/64-bit modes (grows downward) - MOVED ABOVE BSS!
 
 ; === CONSTANTS ===
 KERNEL_LOAD_ADDR      equ 0x10000
 KERNEL_SECTOR_START   equ 10
-KERNEL_SECTOR_COUNT   equ 200
-KERNEL_SIZE_BYTES     equ 102400        ; 200 * 512
-KERNEL_END_ADDR       equ 0x29000       ; 0x10000 + 0x19000
+KERNEL_SECTOR_COUNT   equ 250
+KERNEL_SIZE_BYTES     equ 128000        ; 250 * 512
+KERNEL_END_ADDR       equ 0x2F400       ; 0x10000 + 0x1F400 (128000 bytes)
 
-PAGE_TABLE_BASE       equ 0x70000
+PAGE_TABLE_BASE       equ 0x500000      ; MOVED: Above kernel BSS (was 0x70000)
 E820_MAP_ADDR         equ 0x500         ; Low memory (safe after BIOS data area)
 E820_COUNT_ADDR       equ 0x4FE         ; Just before E820 map
 E820_SIZE_ADDR        equ 0x4FC         ; Just before count
-STACK_BASE            equ 0x90000       ; Stack for protected/long mode
+STACK_BASE            equ 0x510000      ; MOVED: Stack above page tables (was 0x90000)
 BOOT_INFO_ADDR        equ 0x9000        ; After Stage2
 
 BOOT_DISK             equ 0x80
@@ -438,6 +440,7 @@ load_kernel_simple:
 
 .use_chs:
     ; Загружаем меньшими порциями, не переходя границу дорожки
+    ; Total: 250 sectors (53+63+63+63+8)
     ; Часть 1: 53 сектора (сектора 11-63 на головке 0) → 0x10000
     mov ah, 0x02
     mov al, 53
@@ -477,14 +480,27 @@ load_kernel_simple:
     int 0x13
     jc .disk_error
 
-    ; Часть 4: 21 сектор (головка 3) → 0x26600
+    ; Часть 4: 63 сектора (вся головка 3) → 0x26600
     mov ah, 0x02
-    mov al, 21
+    mov al, 63
     mov ch, 0
     mov cl, 1
     mov dh, 3
     mov dl, 0x80
     mov bx, 0x2660
+    mov es, bx
+    mov bx, 0x0000
+    int 0x13
+    jc .disk_error
+
+    ; Часть 5: 8 секторов (головка 4) → 0x2E400
+    mov ah, 0x02
+    mov al, 8
+    mov ch, 0
+    mov cl, 1
+    mov dh, 4
+    mov dl, 0x80
+    mov bx, 0x2E40
     mov es, bx
     mov bx, 0x0000
     int 0x13
@@ -641,29 +657,33 @@ detect_memory_e820:
 ; ===== ФУНКЦИИ 32-BIT РЕЖИМА =====
 
 setup_paging_fixed:
-    ; Очистка области для таблиц страниц (16KB)
-    mov edi, 0x70000
+    ; Очистка области для таблиц страниц (16KB) - now at 0x500000
+    mov edi, PAGE_TABLE_BASE
     mov ecx, 4096          ; 16KB / 4 = 4096 dwords
     xor eax, eax
     rep stosd
-    
-    ; PML4 Table (0x70000) - только первая запись
-    mov dword [0x70000], 0x71003      ; Present, Writable, User
-    
-    ; PDPT (0x71000) - только первая запись
-    mov dword [0x71000], 0x72003      ; Present, Writable, User
-    
-    ; PD (0x72000) - маппинг первых 16MB как 2MB страницы
-    mov edi, 0x72000
+
+    ; PML4 Table (0x500000) - только первая запись (64-bit entry)
+    mov dword [PAGE_TABLE_BASE], PAGE_TABLE_BASE + 0x1000 + 3  ; PDPT at +4KB
+    mov dword [PAGE_TABLE_BASE + 4], 0x00000000
+
+    ; PDPT (0x501000) - только первая запись (64-bit entry)
+    mov dword [PAGE_TABLE_BASE + 0x1000], PAGE_TABLE_BASE + 0x2000 + 3  ; PD at +8KB
+    mov dword [PAGE_TABLE_BASE + 0x1004], 0x00000000
+
+    ; PD (0x502000) - маппинг первых 32MB как 2MB страницы (для безопасности)
+    mov edi, PAGE_TABLE_BASE
+    add edi, 0x2000       ; PD offset
     mov eax, 0x000083     ; Present, Writable, Page Size (2MB)
-    mov ecx, 8            ; 8 записей по 2MB = 16MB
-    
+    mov ecx, 16           ; 16 записей по 2MB = 32MB (was 8 entries = 16MB)
+
 .fill_pd:
-    mov [edi], eax
+    mov [edi], eax        ; Lower 32 bits
+    mov dword [edi+4], 0  ; Upper 32 bits (explicit zero)
     add eax, 0x200000     ; Следующие 2MB
     add edi, 8
     loop .fill_pd
-    
+
     ret
 
 enable_long_mode_fixed:
@@ -671,9 +691,9 @@ enable_long_mode_fixed:
     mov eax, cr4
     or eax, (1 << 5)      ; PAE bit
     mov cr4, eax
-    
-    ; Загрузка PML4 в CR3
-    mov eax, 0x70000
+
+    ; Загрузка PML4 в CR3 (now at 0x500000)
+    mov eax, PAGE_TABLE_BASE
     mov cr3, eax
     
     ; Включение Long Mode в EFER
@@ -735,9 +755,9 @@ gdt_descriptor:
     dd gdt_start                  ; Base address (32-bit в 16-bit режиме)
 
 ; ===== DAP STRUCTURES FOR INT 13h EXTENSIONS (LBA MODE) =====
-; Total: 200 sectors = 100KB
+; Total: 250 sectors = 125KB
 ; Part 1: 127 sectors (max single read) → 0x10000
-; Part 2: 73 sectors (200-127)        → 0x1FE00
+; Part 2: 123 sectors (250-127)        → 0x1FE00
 align 4
 dap1:
     db 0x10             ; DAP size (16 bytes)
@@ -751,7 +771,7 @@ align 4
 dap2:
     db 0x10             ; DAP size (16 bytes)
     db 0                ; Reserved
-    dw 73               ; Sector count: 73 (200 - 127 = 73) *** FIXED FROM 93 ***
+    dw 123              ; Sector count: 123 (250 - 127 = 123)
     dw 0x0000           ; Offset
     dw 0x1FE0           ; Segment (0x1FE0:0x0000 = 0x1FE00 physical)
     dq 137              ; Starting LBA sector: 137 (10 + 127)
@@ -764,8 +784,8 @@ msg_e820_success      db '[OK] E820 memory map created', 13, 10, 0
 msg_e820_fail         db '[WARN] E820 failed, using fallback', 13, 10, 0
 msg_memory_fallback   db '[OK] Fallback memory detection', 13, 10, 0
 msg_memory_error      db '[ERROR] Memory detection failed!', 13, 10, 0
-msg_loading_kernel    db 'Loading kernel (200 sectors)...', 13, 10, 0
-msg_kernel_loaded     db '[OK] Kernel loaded (100KB)', 13, 10, 0
+msg_loading_kernel    db 'Loading kernel (250 sectors)...', 13, 10, 0
+msg_kernel_loaded     db '[OK] Kernel loaded (125KB)', 13, 10, 0
 msg_kernel_empty      db '[WARN] Kernel appears empty', 13, 10, 0
 msg_disk_error        db '[ERROR] Disk read failed!', 13, 10, 0
 msg_long_mode_ok      db '[OK] CPU supports 64-bit mode', 13, 10, 0
