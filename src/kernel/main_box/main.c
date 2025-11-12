@@ -12,8 +12,10 @@
 #include "tagfs.h"
 #include "task.h"
 #include "pit.h"
+#include "keyboard.h"
 #include "eventdriven_system.h"
 #include "eventdriven_demo.h"
+#include "shell.h"
 #include "serial.h"
 
 extern uint8_t user_experience_level;
@@ -161,10 +163,14 @@ void kernel_main(e820_entry_t* e820_map, uint64_t e820_count, uint64_t mem_start
     eventdriven_demo_run();
     kprintf("%[S] Demo completed!%[D]\n");
 
-    // Главный цикл с HLT
-    kprintf("\n%[H]Entering idle loop...%[D]\n");
+    // === SHELL INITIALIZATION ===
+    kprintf("\n%[H]=== Starting BoxOS Shell ===%[D]\n\n");
+    shell_init();
+    shell_run();  // Never returns
+
+    // Should never reach here
     while (1) {
-        asm volatile("hlt");  // Ждем прерывания
+        asm volatile("hlt");
     }
 
 }

@@ -5,6 +5,7 @@
 #include "pic.h"  // ИСПРАВЛЕНО: добавлен include
 #include "pit.h"  // PIT timer driver
 #include "task.h" // Task scheduler
+#include "keyboard.h" // Keyboard driver
 
 static idt_entry_t idt[IDT_ENTRIES];
 static idt_descriptor_t idt_desc;
@@ -203,12 +204,9 @@ void irq_handler(interrupt_frame_t* frame) {
             break;
             
         case IRQ_KEYBOARD:
-            // Клавиатура - читаем и логируем реже
+            // Клавиатура - читаем scancode и обрабатываем
             uint8_t scancode = inb(0x60);
-            if (irq_count[1] % 20 == 0) {  // Каждое 20-е нажатие
-                kprintf("%[H]Keyboard: scancode=0x%02x (press #%llu)%[D]\n", 
-                       scancode, irq_count[1]);
-            }
+            keyboard_handle_scancode(scancode);
             break;
             
         default:

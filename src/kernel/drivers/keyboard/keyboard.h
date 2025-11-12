@@ -18,5 +18,16 @@ typedef struct {
     uint8_t last_keycode; // Для отслеживания предыдущего кода
 } keyboard_state_t;
 
+// Initialization
+void keyboard_init(void);
+
+// IRQ handler (called from interrupt context)
+void keyboard_handle_scancode(uint8_t scancode);
+
+// Input API
+int keyboard_has_input(void);          // Returns 1 if input available
+char keyboard_getchar(void);           // Non-blocking read (returns 0 if no input)
+char keyboard_getchar_blocking(void);  // Blocking read (waits for input)
+void keyboard_flush(void);             // Clear input buffer
 
 #endif // KEYBOARD_H
