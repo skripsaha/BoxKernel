@@ -1,77 +1,113 @@
 [BITS 16]
 [ORG 0x8000]
 
-; Stage2 - Исправленная версия с устранением triple fault
-; Подпись для проверки
-dw 0x2907
+; ===================================================================
+; STAGE2 - Advanced Bootloader (4096 bytes, 9 sectors)
+; ===================================================================
+; Responsibilities:
+;   - Enable A20 line
+;   - Detect memory (E820)
+;   - Load kernel from disk
+;   - Setup paging for long mode
+;   - Enter 64-bit long mode
+;   - Jump to kernel
+; ===================================================================
+
+; === MEMORY MAP ===
+; 0x7C00      - Stage1 (512 bytes)
+; 0x8000      - Stage2 (4096 bytes) - THIS CODE
+; 0x10000     - Kernel (102400 bytes = 200 sectors = 100KB)
+; 0x70000     - Page tables (16KB: PML4, PDPT, PD, PT)
+; 0x90000     - Stack and E820 memory map
+; 0x8FFE      - E820 entry count (word)
+; 0x8FFC      - E820 total size in bytes (word)
+
+; === CONSTANTS ===
+KERNEL_LOAD_ADDR      equ 0x10000
+KERNEL_SECTOR_START   equ 10
+KERNEL_SECTOR_COUNT   equ 200
+KERNEL_SIZE_BYTES     equ 102400        ; 200 * 512
+KERNEL_END_ADDR       equ 0x29000       ; 0x10000 + 0x19000
+
+PAGE_TABLE_BASE       equ 0x70000
+STACK_BASE            equ 0x90000
+E820_MAP_ADDR         equ 0x90000
+E820_COUNT_ADDR       equ 0x8FFE
+E820_SIZE_ADDR        equ 0x8FFC
+
+BOOT_DISK             equ 0x80
+STAGE2_SIGNATURE      equ 0x2907
+
+; Signature for Stage1 verification
+dw STAGE2_SIGNATURE
 
 start_stage2:
-    ; Отключаем прерывания в начале
+    ; Disable interrupts during initialization
     cli
-    
-    ; Очистка направления флага
+
+    ; Clear direction flag
     cld
-    
-    ; Настройка сегментов более безопасно
+
+    ; Setup segments
     xor ax, ax
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
-    
-    ; Настройка стека с выравниванием
+
+    ; Setup stack (16-byte aligned for future BIOS calls)
     mov ss, ax
-    mov sp, 0x7BF0    ; Стек ниже загрузчика, выровнен
-    
-    ; Теперь можно включить прерывания
+    mov sp, 0x7C00          ; Stack below Stage1, grows downward
+
+    ; Re-enable interrupts for BIOS calls
     sti
 
-    ; Сообщение о старте
+    ; Print startup message
     mov si, msg_stage2_start
     call print_string_16
-    
-    call wait_key
-    
-    ; Включение A20 (улучшенная версия)
+
+    ; Enable A20 line
     call enable_a20_enhanced
-    
-    ; Детекция памяти
+
+    ; Detect memory with E820
     call detect_memory_e820
 
-    ; Загрузка ядра
+    ; Load kernel from disk
     call load_kernel_simple
 
-    ; Переход в защищенный режим
+    ; Check CPU compatibility (long mode support)
+    call check_long_mode_support
+
+    ; Entering protected mode
     mov si, msg_entering_protected
     call print_string_16
-    call wait_key
-    
-    ; Отключаем прерывания перед переходом
+
+    ; Disable interrupts before mode switch
     cli
-    
-    ; Загрузка GDT
+
+    ; Load GDT
     lgdt [gdt_descriptor]
-    
-    ; Включение защищенного режима
+
+    ; Enable protected mode
     mov eax, cr0
     or eax, 1
     mov cr0, eax
-    
-    ; Far jump для очистки pipeline
+
+    ; Far jump to flush pipeline and load CS
     jmp 0x08:protected_mode_start
 
 [BITS 32]
 protected_mode_start:
-    ; Настройка сегментов в 32-bit режиме
-    mov ax, 0x10        ; Data segment selector
+    ; Setup segments in 32-bit mode
+    mov ax, 0x10        ; Data segment selector (GDT entry 2)
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    
-    ; Настройка стека (выровнен по 16 байт)
-    mov esp, 0x90000
+
+    ; Setup stack (16-byte aligned)
+    mov esp, STACK_BASE
     
     ; Очистка EFLAGS
     push dword 0
@@ -96,16 +132,16 @@ protected_mode_start:
 
 [BITS 64]
 long_mode_start:
-    ; Настройка сегментов в 64-bit режиме
-    mov ax, 0x20        ; Используем правильный селектор данных
+    ; Setup segments in 64-bit mode
+    mov ax, 0x20        ; Data segment selector (GDT entry 4)
     mov ds, ax
     mov es, ax
     mov fs, ax
     mov gs, ax
     mov ss, ax
-    
-    ; Настройка стека для 64-bit (выровнен по 16 байт)
-    mov rsp, 0x90000
+
+    ; Setup stack for 64-bit mode (16-byte aligned)
+    mov rsp, STACK_BASE
     
     ; Очистка RFLAGS
     push qword 0
@@ -119,24 +155,24 @@ long_mode_start:
     mov al, 'M'
     mov [rdi+6], ax
     
-    ; Подготовка параметров для ядра
-    mov rdi, 0x90000             ; Адрес e820 карты
-    movzx rsi, word [0x8FFE]     ; Размер e820 карты
-    
-    ; Проверка загрузки ядра
-    mov rax, [0x10000]
+    ; Prepare parameters for kernel
+    mov rdi, E820_MAP_ADDR              ; E820 memory map address
+    movzx rsi, word [E820_COUNT_ADDR]   ; E820 entry count
+
+    ; Verify kernel was loaded (check first 8 bytes)
+    mov rax, [KERNEL_LOAD_ADDR]
     test rax, rax
     jz .kernel_not_loaded
-    
-    ; Сохраняем данные для ядра
-    mov [0x8000], dword 0x90000     ; Адрес E820 карты
-    mov ax, [0x8FFE]
-    mov [0x8004], ax                ; Размер E820 карты
-    mov [0x8008], dword 0x10000     ; Адрес загрузки ядра
-    mov [0x800C], dword 0x29000     ; Конец ядра (200 секторов * 512 = 100KB)
-    
-    ; Переход в ядро
-    jmp 0x10000
+
+    ; Save boot info for kernel (at 0x8000)
+    mov [0x8000], dword E820_MAP_ADDR   ; E820 map address
+    mov ax, [E820_COUNT_ADDR]
+    mov [0x8004], ax                    ; E820 entry count
+    mov [0x8008], dword KERNEL_LOAD_ADDR ; Kernel load address
+    mov [0x800C], dword KERNEL_END_ADDR  ; Kernel end address
+
+    ; Jump to kernel entry point
+    jmp KERNEL_LOAD_ADDR
     
 .kernel_not_loaded:
     ; Сообщение об ошибке
@@ -154,7 +190,65 @@ long_mode_start:
     jmp $
 
 [BITS 16]
-; ===== ФУНКЦИИ 16-BIT РЕЖИМА =====
+; ===== 16-BIT MODE FUNCTIONS =====
+
+; Check if CPU supports long mode (64-bit)
+check_long_mode_support:
+    push eax
+    push ebx
+    push ecx
+    push edx
+
+    ; Check if CPUID is supported
+    pushfd
+    pop eax
+    mov ecx, eax
+    xor eax, 0x00200000         ; Flip ID bit
+    push eax
+    popfd
+    pushfd
+    pop eax
+    push ecx
+    popfd
+    xor eax, ecx
+    jz .no_cpuid                ; ID bit didn't change, no CPUID
+
+    ; Check if extended CPUID functions are available
+    mov eax, 0x80000000
+    cpuid
+    cmp eax, 0x80000001
+    jb .no_long_mode            ; Extended functions not available
+
+    ; Check for long mode support
+    mov eax, 0x80000001
+    cpuid
+    test edx, (1 << 29)         ; LM bit (bit 29)
+    jz .no_long_mode
+
+    ; Long mode is supported
+    mov si, msg_long_mode_ok
+    call print_string_16
+
+    pop edx
+    pop ecx
+    pop ebx
+    pop eax
+    ret
+
+.no_cpuid:
+    mov si, msg_no_cpuid
+    call print_string_16
+    jmp .halt
+
+.no_long_mode:
+    mov si, msg_no_long_mode
+    call print_string_16
+    jmp .halt
+
+.halt:
+    cli
+    hlt
+    jmp $
 
 print_string_16:
     push ax
@@ -466,17 +560,21 @@ detect_memory_e820:
     add di, 24
     
 .skip_entry:
-    ; Проверяем, есть ли еще записи
+    ; Check if more entries exist
     test ebx, ebx
     jnz .e820_loop
-    
-    ; Сохраняем количество записей
-    mov [0x8FFE], bp
-    shl bp, 4               ; Умножаем на 24 (приблизительно)
-    add bp, bp
-    add bp, bp
-    add bp, bp
-    mov [0x8FFC], bp        ; Размер в байтах
+
+    ; Save entry count
+    mov [E820_COUNT_ADDR], bp
+
+    ; Calculate total size: bp * 24 bytes per entry
+    ; 24 = 16 + 8, so: (bp << 4) + (bp << 3)
+    mov ax, bp
+    shl ax, 4               ; AX = bp * 16
+    mov cx, bp
+    shl cx, 3               ; CX = bp * 8
+    add ax, cx              ; AX = bp * 24
+    mov [E820_SIZE_ADDR], ax
     
     mov si, msg_e820_success
     call print_string_16
@@ -485,38 +583,38 @@ detect_memory_e820:
 .e820_fail:
     mov si, msg_e820_fail
     call print_string_16
-    
-    ; Fallback: создаем минимальную карту памяти
+
+    ; Fallback: create minimal memory map
     mov ax, 0x9000
     mov es, ax
     xor di, di
-    
-    ; Первая запись: 0-640KB (usable)
-    mov dword [es:di], 0x00000000
-    mov dword [es:di+4], 0x00000000
-    mov dword [es:di+8], 0x0009FC00    ; 640KB
-    mov dword [es:di+12], 0x00000000
-    mov dword [es:di+16], 1            ; Usable
-    mov dword [es:di+20], 0
+
+    ; Entry 1: 0-640KB (usable RAM)
+    mov dword [es:di], 0x00000000      ; Base address low
+    mov dword [es:di+4], 0x00000000    ; Base address high
+    mov dword [es:di+8], 0x0009FC00    ; Length: 640KB
+    mov dword [es:di+12], 0x00000000   ; Length high
+    mov dword [es:di+16], 1            ; Type: usable
+    mov dword [es:di+20], 0            ; Extended attributes
     add di, 24
-    
-    ; Вторая запись: 1MB+ (usable, получаем размер через int 15h)
+
+    ; Entry 2: 1MB+ (detect size via INT 15h AH=88h)
     mov ah, 0x88
     int 0x15
     jc .memory_fail
-    
-    mov dword [es:di], 0x00100000      ; 1MB
+
+    mov dword [es:di], 0x00100000      ; Base: 1MB
     mov dword [es:di+4], 0x00000000
     movzx eax, ax
-    shl eax, 10                        ; KB to bytes
+    shl eax, 10                        ; Convert KB to bytes
     mov [es:di+8], eax
     mov dword [es:di+12], 0x00000000
-    mov dword [es:di+16], 1            ; Usable
+    mov dword [es:di+16], 1            ; Type: usable
     mov dword [es:di+20], 0
-    
-    ; Сохраняем размер (2 записи)
-    mov word [0x8FFE], 2
-    mov word [0x8FFC], 48
+
+    ; Save entry count and size (2 entries * 24 bytes = 48)
+    mov word [E820_COUNT_ADDR], 2
+    mov word [E820_SIZE_ADDR], 48
     
     mov si, msg_memory_fallback
     call print_string_16
@@ -624,38 +722,44 @@ gdt_descriptor:
     dw gdt_end - gdt_start - 1    ; Limit
     dd gdt_start                  ; Base address (32-bit в 16-bit режиме)
 
-; ===== DAP для INT 13h Extensions (LBA) =====
+; ===== DAP STRUCTURES FOR INT 13h EXTENSIONS (LBA MODE) =====
+; Total: 200 sectors = 100KB
+; Part 1: 127 sectors (max single read) → 0x10000
+; Part 2: 73 sectors (200-127)        → 0x1FE00
 align 4
 dap1:
-    db 0x10             ; Размер DAP (16 байт)
-    db 0                ; Зарезервировано
-    dw 127              ; Количество секторов (127)
+    db 0x10             ; DAP size (16 bytes)
+    db 0                ; Reserved
+    dw 127              ; Sector count: 127 (maximum per INT 13h call)
     dw 0x0000           ; Offset
-    dw 0x1000           ; Segment (0x1000:0x0000 = 0x10000)
-    dq 10               ; LBA начальный сектор (10)
+    dw 0x1000           ; Segment (0x1000:0x0000 = 0x10000 physical)
+    dq 10               ; Starting LBA sector: 10
 
 align 4
 dap2:
-    db 0x10             ; Размер DAP (16 байт)
-    db 0                ; Зарезервировано
-    dw 93               ; Количество секторов (73)
+    db 0x10             ; DAP size (16 bytes)
+    db 0                ; Reserved
+    dw 73               ; Sector count: 73 (200 - 127 = 73) *** FIXED FROM 93 ***
     dw 0x0000           ; Offset
-    dw 0x1FE0           ; Segment (0x1FE0:0x0000 = 0x1FE00)
-    dq 137              ; LBA начальный сектор (10 + 127 = 137)
+    dw 0x1FE0           ; Segment (0x1FE0:0x0000 = 0x1FE00 physical)
+    dq 137              ; Starting LBA sector: 137 (10 + 127)
 
-; ===== СООБЩЕНИЯ =====
-msg_stage2_start      db 'Boxloader Stage2 Started - Press any key', 13, 10, 0
-msg_a20_enabled       db 'A20 line enabled', 13, 10, 0
-msg_detecting_memory  db 'Detecting memory...', 13, 10, 0
-msg_e820_success      db 'E820 memory detection successful', 13, 10, 0
-msg_e820_fail         db 'E820 failed, using fallback', 13, 10, 0
-msg_memory_fallback   db 'Using INT 15h AH=88h for memory', 13, 10, 0
-msg_memory_error      db 'Memory detection failed!', 13, 10, 0
-msg_loading_kernel    db 'Loading kernel...', 13, 10, 0
-msg_kernel_loaded     db 'Kernel loaded successfully', 13, 10, 0
-msg_kernel_empty      db 'Warning: Kernel appears empty', 13, 10, 0
-msg_disk_error        db 'Disk read error!', 13, 10, 0
-msg_entering_protected db 'Entering protected mode - Press any key', 13, 10, 0
+; ===== MESSAGES =====
+msg_stage2_start      db 'BoxKernel Stage2 Started', 13, 10, 0
+msg_a20_enabled       db '[OK] A20 line enabled', 13, 10, 0
+msg_detecting_memory  db 'Detecting memory (E820)...', 13, 10, 0
+msg_e820_success      db '[OK] E820 memory map created', 13, 10, 0
+msg_e820_fail         db '[WARN] E820 failed, using fallback', 13, 10, 0
+msg_memory_fallback   db '[OK] Fallback memory detection', 13, 10, 0
+msg_memory_error      db '[ERROR] Memory detection failed!', 13, 10, 0
+msg_loading_kernel    db 'Loading kernel (200 sectors)...', 13, 10, 0
+msg_kernel_loaded     db '[OK] Kernel loaded (100KB)', 13, 10, 0
+msg_kernel_empty      db '[WARN] Kernel appears empty', 13, 10, 0
+msg_disk_error        db '[ERROR] Disk read failed!', 13, 10, 0
+msg_long_mode_ok      db '[OK] CPU supports 64-bit mode', 13, 10, 0
+msg_no_cpuid          db '[ERROR] CPUID not supported!', 13, 10, 0
+msg_no_long_mode      db '[ERROR] 64-bit mode not supported!', 13, 10, 0
+msg_entering_protected db 'Entering protected mode...', 13, 10, 0
 
 
 ; Заполнение до 4KB
