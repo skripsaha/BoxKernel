@@ -33,6 +33,16 @@ static spinlock_t fd_table_lock;
 // Глобальный счетчик FD
 static volatile uint64_t next_fd = 100;
 
+// File stat structure (returned by fs_stat)
+typedef struct {
+    uint64_t inode_id;           // Inode ID
+    uint64_t size;               // File size in bytes
+    uint64_t creation_time;      // Creation timestamp (RDTSC)
+    uint64_t modification_time;  // Last modification timestamp
+    uint32_t tag_count;          // Number of tags
+    uint32_t flags;              // File flags
+} FileStat;
+
 // ============================================================================
 // MEMORY OPERATIONS
 // ============================================================================
@@ -247,6 +257,49 @@ static int fs_write(int fd, const void* buffer, uint64_t size) {
     }
 }
 
+// Get file statistics
+static int fs_stat(const char* path, FileStat* stat_buf) {
+    if (!stat_buf) {
+        return -1;  // Invalid buffer
+    }
+
+    // Search for file by name tag
+    Tag search_tag;
+    strcpy(search_tag.key, "name");
+    strcpy(search_tag.value, path);
+
+    uint64_t result_inodes[10];
+    uint32_t count = 0;
+
+    int ret = tagfs_query_single(&search_tag, result_inodes, &count, 10);
+
+    if (ret == 0 && count > 0) {
+        // Found file - get inode info
+        uint64_t inode_id = result_inodes[0];
+        FileInode* inode = tagfs_get_inode(inode_id);
+
+        if (inode) {
+            // Fill stat buffer
+            stat_buf->inode_id = inode->inode_id;
+            stat_buf->size = inode->size;
+            stat_buf->creation_time = inode->creation_time;
+            stat_buf->modification_time = inode->modification_time;
+            stat_buf->tag_count = inode->tag_count;
+            stat_buf->flags = inode->flags;
+
+            kprintf("[STORAGE] ✅ Stat '%s': inode=%lu, size=%lu bytes, tags=%u\n",
+                    path, inode_id, inode->size, inode->tag_count);
+            return 0;  // Success
+        } else {
+            kprintf("[STORAGE] ❌ Stat '%s': inode not found in memory\n", path);
+            return -1;
+        }
+    } else {
+        kprintf("[STORAGE] ❌ Stat '%s': file not found\n", path);
+        return -1;  // File not found
+    }
+}
+
 // ============================================================================
 // PROCESSING FUNCTION
 // ============================================================================
@@ -282,10 +335,40 @@ int storage_deck_process(RoutingEntry* entry) {
         }
 
         case EVENT_MEMORY_MAP: {
-            // TODO: Memory mapping
-            kprintf("[STORAGE] Event %lu: memory map - STUB\n", event->id);
-            deck_complete(entry, DECK_PREFIX_STORAGE, 0);
-            return 1;
+            // Payload: [size:8][flags:4][fd:4] (fd can be -1 for anonymous mapping)
+            uint64_t size = *(uint64_t*)event->data;
+            uint32_t flags = *(uint32_t*)(event->data + 8);
+            int fd = *(int*)(event->data + 12);
+
+            // ✅ Real memory mapping implementation
+            // For now, implement anonymous mapping (fd == -1)
+            // File-backed mapping can be added later
+
+            if (fd == -1) {
+                // Anonymous mapping - allocate virtual memory
+                void* mapped_addr = vmalloc(size);
+
+                if (mapped_addr) {
+                    // Zero-initialize if requested
+                    if (flags & 0x01) {  // MAP_ZERO flag
+                        memset(mapped_addr, 0, size);
+                    }
+
+                    kprintf("[STORAGE] ✅ Memory mapped %lu bytes at %p (anonymous)\n",
+                            size, mapped_addr);
+                    deck_complete(entry, DECK_PREFIX_STORAGE, mapped_addr);
+                    return 1;
+                } else {
+                    kprintf("[STORAGE] ❌ Memory mapping failed for %lu bytes\n", size);
+                    deck_error(entry, DECK_PREFIX_STORAGE, 9);
+                    return 0;
+                }
+            } else {
+                // File-backed mapping - TODO: implement later
+                kprintf("[STORAGE] ❌ File-backed memory mapping not yet supported (fd=%d)\n", fd);
+                deck_error(entry, DECK_PREFIX_STORAGE, 10);
+                return 0;
+            }
         }
 
         // === FILESYSTEM OPERATIONS ===
@@ -362,10 +445,27 @@ int storage_deck_process(RoutingEntry* entry) {
 
         case EVENT_FILE_STAT: {
             const char* path = (const char*)event->data;
-            // TODO: stat implementation
-            deck_complete(entry, DECK_PREFIX_STORAGE, 0);
-            kprintf("[STORAGE] Event %lu: stat '%s'\n", event->id, path);
-            return 1;
+
+            // Allocate stat buffer to return to caller
+            FileStat* stat_buf = (FileStat*)kmalloc(sizeof(FileStat));
+            if (!stat_buf) {
+                kprintf("[STORAGE] ❌ Failed to allocate stat buffer\n");
+                deck_error(entry, DECK_PREFIX_STORAGE, 7);
+                return 0;
+            }
+
+            // ✅ Real stat implementation
+            int ret = fs_stat(path, stat_buf);
+            if (ret == 0) {
+                // Success - return stat buffer
+                deck_complete(entry, DECK_PREFIX_STORAGE, stat_buf);
+                return 1;
+            } else {
+                // Failed - free buffer and return error
+                kfree(stat_buf);
+                deck_error(entry, DECK_PREFIX_STORAGE, 8);  // File not found
+                return 0;
+            }
         }
 
         // === TAGFS OPERATIONS ===
