@@ -14,13 +14,14 @@
 ; ===================================================================
 
 ; === MEMORY MAP ===
+; 0x0500      - E820 memory map (safe low memory, up to 2KB)
 ; 0x7C00      - Stage1 (512 bytes)
 ; 0x8000      - Stage2 (4096 bytes) - THIS CODE
+; 0x9000      - Boot info for kernel (256 bytes)
 ; 0x10000     - Kernel (102400 bytes = 200 sectors = 100KB)
+; 0x29000     - End of kernel
 ; 0x70000     - Page tables (16KB: PML4, PDPT, PD, PT)
-; 0x90000     - Stack and E820 memory map
-; 0x8FFE      - E820 entry count (word)
-; 0x8FFC      - E820 total size in bytes (word)
+; 0x90000     - Stack for 32/64-bit modes (grows downward)
 
 ; === CONSTANTS ===
 KERNEL_LOAD_ADDR      equ 0x10000
@@ -30,10 +31,11 @@ KERNEL_SIZE_BYTES     equ 102400        ; 200 * 512
 KERNEL_END_ADDR       equ 0x29000       ; 0x10000 + 0x19000
 
 PAGE_TABLE_BASE       equ 0x70000
-STACK_BASE            equ 0x90000
-E820_MAP_ADDR         equ 0x90000
-E820_COUNT_ADDR       equ 0x8FFE
-E820_SIZE_ADDR        equ 0x8FFC
+E820_MAP_ADDR         equ 0x500         ; Low memory (safe after BIOS data area)
+E820_COUNT_ADDR       equ 0x4FE         ; Just before E820 map
+E820_SIZE_ADDR        equ 0x4FC         ; Just before count
+STACK_BASE            equ 0x90000       ; Stack for protected/long mode
+BOOT_INFO_ADDR        equ 0x9000        ; After Stage2
 
 BOOT_DISK             equ 0x80
 STAGE2_SIGNATURE      equ 0x2907
@@ -164,12 +166,12 @@ long_mode_start:
     test rax, rax
     jz .kernel_not_loaded
 
-    ; Save boot info for kernel (at 0x8000)
-    mov [0x8000], dword E820_MAP_ADDR   ; E820 map address
+    ; Save boot info for kernel (at BOOT_INFO_ADDR)
+    mov [BOOT_INFO_ADDR], dword E820_MAP_ADDR   ; E820 map address
     mov ax, [E820_COUNT_ADDR]
-    mov [0x8004], ax                    ; E820 entry count
-    mov [0x8008], dword KERNEL_LOAD_ADDR ; Kernel load address
-    mov [0x800C], dword KERNEL_END_ADDR  ; Kernel end address
+    mov [BOOT_INFO_ADDR+4], ax                  ; E820 entry count
+    mov [BOOT_INFO_ADDR+8], dword KERNEL_LOAD_ADDR ; Kernel load address
+    mov [BOOT_INFO_ADDR+12], dword KERNEL_END_ADDR ; Kernel end address
 
     ; Jump to kernel entry point
     jmp KERNEL_LOAD_ADDR
@@ -523,19 +525,19 @@ load_kernel_simple:
 detect_memory_e820:
     mov si, msg_detecting_memory
     call print_string_16
-    
-    ; Очистим e820 буфер
-    mov ax, 0x9000
+
+    ; Очистим e820 буфер (0x500 = segment 0x50, offset 0)
+    mov ax, 0x50
     mov es, ax
     xor di, di
     mov cx, 1024        ; Увеличиваем буфер
     xor ax, ax
     rep stosw
-    
+
     ; E820 detection
     xor ebx, ebx
     mov edx, 0x534D4150    ; 'SMAP'
-    mov ax, 0x9000
+    mov ax, 0x50
     mov es, ax
     xor di, di
     xor bp, bp             ; Счетчик записей
@@ -564,6 +566,10 @@ detect_memory_e820:
     test ebx, ebx
     jnz .e820_loop
 
+    ; Восстанавливаем ES перед сохранением
+    xor ax, ax
+    mov es, ax
+
     ; Save entry count
     mov [E820_COUNT_ADDR], bp
 
@@ -575,7 +581,7 @@ detect_memory_e820:
     shl cx, 3               ; CX = bp * 8
     add ax, cx              ; AX = bp * 24
     mov [E820_SIZE_ADDR], ax
-    
+
     mov si, msg_e820_success
     call print_string_16
     ret
@@ -584,8 +590,8 @@ detect_memory_e820:
     mov si, msg_e820_fail
     call print_string_16
 
-    ; Fallback: create minimal memory map
-    mov ax, 0x9000
+    ; Fallback: create minimal memory map at 0x500
+    mov ax, 0x50
     mov es, ax
     xor di, di
 
@@ -612,15 +618,21 @@ detect_memory_e820:
     mov dword [es:di+16], 1            ; Type: usable
     mov dword [es:di+20], 0
 
+    ; Восстанавливаем ES
+    xor ax, ax
+    mov es, ax
+
     ; Save entry count and size (2 entries * 24 bytes = 48)
     mov word [E820_COUNT_ADDR], 2
     mov word [E820_SIZE_ADDR], 48
-    
+
     mov si, msg_memory_fallback
     call print_string_16
     ret
 
 .memory_fail:
+    xor ax, ax
+    mov es, ax
     mov si, msg_memory_error
     call print_string_16
     ret
