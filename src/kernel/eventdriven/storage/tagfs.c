@@ -1144,6 +1144,13 @@ void tagfs_index_rebuild(void) {
     }
     global_tagfs.tag_index.entry_count = 0;
 
+    // OPTIMIZATION: Skip scanning for freshly formatted filesystem
+    if (global_tagfs.superblock->free_inodes == global_tagfs.superblock->total_inodes) {
+        kprintf("[TAGFS] Filesystem is empty, skipping inode scan\n");
+        kprintf("[TAGFS] Index rebuilt: 0 unique tags\n");
+        return;
+    }
+
     // Calculate maximum safe inodes we can access
     // inode_table starts at block inode_table_block
     // Each block is 4096 bytes, each inode is 512 bytes (8 inodes per block)
@@ -1170,11 +1177,13 @@ void tagfs_index_rebuild(void) {
     kprintf("[TAGFS] Scanning %lu inodes for index rebuild...\n", inodes_to_scan);
 
     // Scan all inodes and rebuild
-    for (uint64_t i = 0; i < inodes_to_scan; i++) {
+    uint32_t scanned = 0;
+    for (uint64_t i = 0; i < inodes_to_scan && scanned < 10000; i++) {
         FileInode* inode = &global_tagfs.inode_table[i];
         if (inode->inode_id != 0) {
             tagfs_index_add_file(inode->inode_id, inode->tags, inode->tag_count);
         }
+        scanned++;
     }
 
     kprintf("[TAGFS] Index rebuilt: %u unique tags\n", global_tagfs.tag_index.entry_count);
