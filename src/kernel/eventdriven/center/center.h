@@ -183,14 +183,31 @@ static inline void center_determine_route(EventType type, uint8_t prefixes[MAX_R
 // ============================================================================
 
 // Обрабатывает событие: проверяет security, создаёт routing entry и добавляет в таблицу
-static inline int center_process_event(Event* event, RoutingTable* routing_table) {
+static inline int center_process_event(Event* event, RoutingTable* routing_table, ResponseRingBuffer* kernel_to_user_ring) {
     atomic_increment_u64((volatile uint64_t*)&center_stats.events_processed);
 
     // 1. SECURITY CHECK - ПЕРЕД маршрутизацией!
     if (!security_check_event(event)) {
         atomic_increment_u64((volatile uint64_t*)&center_stats.security_denied);
         kprintf("[CENTER] Event %lu DENIED by security\n", event->id);
-        // TODO: отправить error response обратно в user space
+
+        // ✅ FIXED: Отправляем error response обратно в user space
+        Response error_response;
+        response_init(&error_response, event->id, EVENT_STATUS_DENIED);
+        error_response.timestamp = rdtsc();
+        error_response.error_code = 1;  // Security violation
+
+        // Отправляем в response ring
+        // ✅ FIXED: Добавлен timeout
+        uint64_t timeout = 1000000;
+        while (!response_ring_push(kernel_to_user_ring, &error_response)) {
+            cpu_pause();
+            if (--timeout == 0) {
+                kprintf("[CENTER] ERROR: Response ring buffer timeout for event %lu\n", event->id);
+                return 0;  // Не смогли отправить ответ
+            }
+        }
+
         return 0;
     }
 
@@ -225,7 +242,7 @@ static inline int center_process_event(Event* event, RoutingTable* routing_table
 // MAIN LOOP
 // ============================================================================
 
-void center_run(EventRingBuffer* from_receiver_ring, RoutingTable* routing_table);
+void center_run(EventRingBuffer* from_receiver_ring, RoutingTable* routing_table, ResponseRingBuffer* kernel_to_user_ring);
 
 // ============================================================================
 // STATS

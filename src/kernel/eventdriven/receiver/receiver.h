@@ -129,9 +129,16 @@ static inline void receiver_process_event(Event* event, EventRingBuffer* to_cent
     event->timestamp = rdtsc();
 
     // 5. Отправляем в Center для определения маршрута
+    // ✅ FIXED: Добавлен timeout чтобы избежать бесконечного зависания
+    uint64_t timeout = 1000000;  // ~1млн итераций
     while (!event_ring_push(to_center_ring, event)) {
-        // Busy-wait если буфер полон (можно добавить backpressure)
         cpu_pause();
+        if (--timeout == 0) {
+            // Timeout - буфер переполнен слишком долго!
+            kprintf("[RECEIVER] ERROR: Center ring buffer timeout for event %lu\n", event->id);
+            atomic_increment_u64((volatile uint64_t*)&receiver_stats.events_rejected);
+            return;  // Отбрасываем событие
+        }
     }
 
     atomic_increment_u64((volatile uint64_t*)&receiver_stats.events_forwarded);
