@@ -11,6 +11,7 @@
 #include "ata.h"
 #include "tagfs.h"
 #include "task.h"
+#include "pit.h"
 #include "eventdriven_system.h"
 #include "eventdriven_demo.h"
 #include "serial.h"
@@ -114,10 +115,15 @@ void kernel_main(void) {
     pic_init();
     pic_test();
 
+    // === PIT (TIMER) SETUP ===
+    kprintf("\n%[H]=== Step 5: PIT Timer Setup ===%[D]\n");
+    pit_init(100);  // 100 Hz = 10ms per tick
+    kprintf("%[S] PIT timer initialized (100 Hz)%[D]\n");
+
     kprintf("\n%[S] All core systems initialized!%[D]\n");
 
     // === EVENT-DRIVEN SYSTEM INITIALIZATION ===
-    kprintf("\n%[H]=== Step 5: Event-Driven System === %[D]\n");
+    kprintf("\n%[H]=== Step 6: Event-Driven System === %[D]\n");
     eventdriven_system_init();
     eventdriven_system_start();
     kprintf("%[S] Event-driven system initialized!%[D]\n");

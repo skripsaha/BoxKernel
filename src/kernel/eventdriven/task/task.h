@@ -108,6 +108,7 @@ typedef struct Task {
     void* stack_base;              // Stack base address
     uint64_t stack_size;           // Stack size
     void* entry_point;             // Task entry point function
+    void* args;                    // Arguments passed to entry point
 
     // === CPU CONTEXT ===
     TaskContext context;           // Saved CPU state
