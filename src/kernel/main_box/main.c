@@ -43,7 +43,7 @@ void asm_stop(){
 
 
 void kernel_main(void) {
-    e820_set_entries((e820_entry_t*)0x90000, *(uint16_t*)0x8FFE);
+    e820_set_entries((e820_entry_t*)0x500, *(uint16_t*)0x4FE);
     vga_init();
     kprintf("%[S]BoxOS Starting...%[D]\n");
     
