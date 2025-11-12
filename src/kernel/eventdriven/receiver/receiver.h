@@ -4,6 +4,7 @@
 #include "../core/events.h"
 #include "../core/ringbuffer.h"
 #include "../core/atomics.h"
+#include "klib.h"
 
 // ============================================================================
 // EVENT RECEIVER - Первый компонент pipeline

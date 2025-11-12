@@ -14,13 +14,21 @@ typedef struct {
     uint64_t size;
 } MemoryAllocResult;
 
-// Простая структура file descriptor (заглушка)
+// ✅ REAL FILE DESCRIPTOR TABLE
 typedef struct {
-    int fd;
-    char path[256];
-    uint64_t size;
-    uint64_t position;
+    int fd;                    // File descriptor number
+    uint64_t inode_id;         // TagFS inode ID
+    char path[256];            // File path/name
+    uint64_t size;             // File size
+    uint64_t position;         // Current read/write position
+    int flags;                 // Open flags (O_RDONLY, O_WRONLY, O_RDWR)
+    int in_use;                // 1 if FD is active, 0 if free
 } FileDescriptor;
+
+// Глобальная таблица открытых файлов
+#define MAX_OPEN_FILES 256
+static FileDescriptor fd_table[MAX_OPEN_FILES];
+static spinlock_t fd_table_lock;
 
 // Глобальный счетчик FD
 static volatile uint64_t next_fd = 100;
@@ -54,46 +62,189 @@ static void memory_free(void* addr, uint64_t size) {
 }
 
 // ============================================================================
-// FILESYSTEM OPERATIONS (STUBS - для демонстрации v1)
+// FILE DESCRIPTOR TABLE MANAGEMENT
 // ============================================================================
 
-static FileDescriptor* fs_open(const char* path) {
-    // TODO: реальное открытие файла через VFS
+static int allocate_fd(uint64_t inode_id, const char* path, int flags) {
+    spin_lock(&fd_table_lock);
 
-    FileDescriptor* fd_info = (FileDescriptor*)kmalloc(sizeof(FileDescriptor));
-    fd_info->fd = atomic_increment_u64(&next_fd);
+    for (int i = 0; i < MAX_OPEN_FILES; i++) {
+        if (!fd_table[i].in_use) {
+            // Found free slot
+            fd_table[i].in_use = 1;
+            fd_table[i].fd = atomic_increment_u64(&next_fd);
+            fd_table[i].inode_id = inode_id;
+            fd_table[i].position = 0;
+            fd_table[i].flags = flags;
 
-    // Копируем путь
-    int i = 0;
-    while (path[i] && i < 255) {
-        fd_info->path[i] = path[i];
-        i++;
+            // Copy path
+            int j = 0;
+            while (path[j] && j < 255) {
+                fd_table[i].path[j] = path[j];
+                j++;
+            }
+            fd_table[i].path[j] = 0;
+
+            // Get file size from inode
+            FileInode* inode = tagfs_get_inode(inode_id);
+            fd_table[i].size = inode ? inode->size : 0;
+
+            int fd = fd_table[i].fd;
+            spin_unlock(&fd_table_lock);
+            return fd;
+        }
     }
-    fd_info->path[i] = 0;
 
-    fd_info->size = 0;  // TODO: получить реальный размер
-    fd_info->position = 0;
-
-    kprintf("[STORAGE] Opened file '%s' with fd=%d\n", path, fd_info->fd);
-    return fd_info;
+    spin_unlock(&fd_table_lock);
+    return -1;  // No free slots
 }
 
+static FileDescriptor* find_fd(int fd) {
+    spin_lock(&fd_table_lock);
+
+    for (int i = 0; i < MAX_OPEN_FILES; i++) {
+        if (fd_table[i].in_use && fd_table[i].fd == fd) {
+            spin_unlock(&fd_table_lock);
+            return &fd_table[i];
+        }
+    }
+
+    spin_unlock(&fd_table_lock);
+    return NULL;  // Not found
+}
+
+static void free_fd(int fd) {
+    spin_lock(&fd_table_lock);
+
+    for (int i = 0; i < MAX_OPEN_FILES; i++) {
+        if (fd_table[i].in_use && fd_table[i].fd == fd) {
+            fd_table[i].in_use = 0;
+            break;
+        }
+    }
+
+    spin_unlock(&fd_table_lock);
+}
+
+// ============================================================================
+// REAL FILESYSTEM OPERATIONS - Using TagFS! ✅
+// ============================================================================
+
+// Open file: search by name tag, return FD
+static int fs_open(const char* path) {
+    // Strategy: search for file with tag "name:path"
+    Tag search_tag;
+    strcpy(search_tag.key, "name");
+    strcpy(search_tag.value, path);
+
+    uint64_t result_inodes[10];
+    uint32_t count = 0;
+
+    int ret = tagfs_query_single(&search_tag, result_inodes, &count, 10);
+
+    if (ret == 0 && count > 0) {
+        // Found file - open first match
+        uint64_t inode_id = result_inodes[0];
+        int fd = allocate_fd(inode_id, path, 0);  // flags=0 for now
+
+        if (fd >= 0) {
+            kprintf("[STORAGE] ✅ Opened file '%s' (inode=%lu, fd=%d)\n",
+                    path, inode_id, fd);
+            return fd;
+        } else {
+            kprintf("[STORAGE] ❌ Failed to allocate FD for '%s'\n", path);
+            return -1;
+        }
+    } else {
+        // File not found - create it!
+        Tag tags[2];
+        strcpy(tags[0].key, "name");
+        strcpy(tags[0].value, path);
+        strcpy(tags[1].key, "type");
+        strcpy(tags[1].value, "file");
+
+        uint64_t inode_id = tagfs_create_file(tags, 2);
+
+        if (inode_id != TAGFS_INVALID_INODE) {
+            int fd = allocate_fd(inode_id, path, 0);
+            kprintf("[STORAGE] ✅ Created & opened file '%s' (inode=%lu, fd=%d)\n",
+                    path, inode_id, fd);
+            return fd;
+        } else {
+            kprintf("[STORAGE] ❌ Failed to create file '%s'\n", path);
+            return -1;
+        }
+    }
+}
+
+// Close file: free FD
 static int fs_close(int fd) {
-    // TODO: реальное закрытие файла
-    kprintf("[STORAGE] Closed fd=%d\n", fd);
-    return 0;  // Success
+    FileDescriptor* fd_info = find_fd(fd);
+
+    if (fd_info) {
+        kprintf("[STORAGE] ✅ Closed fd=%d (inode=%lu, '%s')\n",
+                fd, fd_info->inode_id, fd_info->path);
+        free_fd(fd);
+        return 0;
+    } else {
+        kprintf("[STORAGE] ❌ Invalid fd=%d\n", fd);
+        return -1;
+    }
 }
 
+// Read from file: use TagFS
 static int fs_read(int fd, void* buffer, uint64_t size) {
-    // TODO: реальное чтение
-    kprintf("[STORAGE] Read %lu bytes from fd=%d\n", size, fd);
-    return size;  // Возвращаем количество прочитанных байт
+    FileDescriptor* fd_info = find_fd(fd);
+
+    if (!fd_info) {
+        kprintf("[STORAGE] ❌ Read: invalid fd=%d\n", fd);
+        return -1;
+    }
+
+    // Read from current position
+    int bytes_read = tagfs_read_file(fd_info->inode_id, fd_info->position,
+                                      (uint8_t*)buffer, size);
+
+    if (bytes_read >= 0) {
+        fd_info->position += bytes_read;
+        kprintf("[STORAGE] ✅ Read %d bytes from fd=%d (inode=%lu, pos=%lu)\n",
+                bytes_read, fd, fd_info->inode_id, fd_info->position);
+        return bytes_read;
+    } else {
+        kprintf("[STORAGE] ❌ Read failed from fd=%d\n", fd);
+        return -1;
+    }
 }
 
+// Write to file: use TagFS
 static int fs_write(int fd, const void* buffer, uint64_t size) {
-    // TODO: реальная запись
-    kprintf("[STORAGE] Wrote %lu bytes to fd=%d\n", size, fd);
-    return size;
+    FileDescriptor* fd_info = find_fd(fd);
+
+    if (!fd_info) {
+        kprintf("[STORAGE] ❌ Write: invalid fd=%d\n", fd);
+        return -1;
+    }
+
+    // Write at current position
+    int bytes_written = tagfs_write_file(fd_info->inode_id, fd_info->position,
+                                          (const uint8_t*)buffer, size);
+
+    if (bytes_written >= 0) {
+        fd_info->position += bytes_written;
+
+        // Update file size in FD
+        FileInode* inode = tagfs_get_inode(fd_info->inode_id);
+        if (inode) {
+            fd_info->size = inode->size;
+        }
+
+        kprintf("[STORAGE] ✅ Wrote %d bytes to fd=%d (inode=%lu, pos=%lu, size=%lu)\n",
+                bytes_written, fd, fd_info->inode_id, fd_info->position, fd_info->size);
+        return bytes_written;
+    } else {
+        kprintf("[STORAGE] ❌ Write failed to fd=%d\n", fd);
+        return -1;
+    }
 }
 
 // ============================================================================
@@ -140,27 +291,31 @@ int storage_deck_process(RoutingEntry* entry) {
         // === FILESYSTEM OPERATIONS ===
         case EVENT_FILE_OPEN: {
             const char* path = (const char*)event->data;
-            FileDescriptor* fd_info = fs_open(path);
+            int fd = fs_open(path);
 
-            if (fd_info) {
-                deck_complete(entry, DECK_PREFIX_STORAGE, fd_info);
-                kprintf("[STORAGE] Event %lu: opened '%s' (fd=%d)\n",
-                        event->id, path, fd_info->fd);
+            if (fd >= 0) {
+                // ✅ Return FD as result
+                int* fd_result = (int*)kmalloc(sizeof(int));
+                *fd_result = fd;
+                deck_complete(entry, DECK_PREFIX_STORAGE, fd_result);
                 return 1;
             } else {
                 deck_error(entry, DECK_PREFIX_STORAGE, 2);
-                kprintf("[STORAGE] Event %lu: failed to open '%s'\n",
-                        event->id, path);
                 return 0;
             }
         }
 
         case EVENT_FILE_CLOSE: {
             int fd = *(int*)event->data;
-            fs_close(fd);
-            deck_complete(entry, DECK_PREFIX_STORAGE, 0);
-            kprintf("[STORAGE] Event %lu: closed fd=%d\n", event->id, fd);
-            return 1;
+            int result = fs_close(fd);
+
+            if (result == 0) {
+                deck_complete(entry, DECK_PREFIX_STORAGE, 0);
+                return 1;
+            } else {
+                deck_error(entry, DECK_PREFIX_STORAGE, 3);
+                return 0;
+            }
         }
 
         case EVENT_FILE_READ: {
@@ -168,11 +323,22 @@ int storage_deck_process(RoutingEntry* entry) {
             int fd = *(int*)event->data;
             uint64_t size = *(uint64_t*)(event->data + 4);
 
-            // TODO: выделить буфер и прочитать данные
-            deck_complete(entry, DECK_PREFIX_STORAGE, 0);
-            kprintf("[STORAGE] Event %lu: read %lu bytes from fd=%d\n",
-                    event->id, size, fd);
-            return 1;
+            // ✅ Allocate buffer and read
+            uint8_t* buffer = (uint8_t*)kmalloc(size);
+            if (!buffer) {
+                deck_error(entry, DECK_PREFIX_STORAGE, 4);
+                return 0;
+            }
+
+            int bytes_read = fs_read(fd, buffer, size);
+            if (bytes_read >= 0) {
+                deck_complete(entry, DECK_PREFIX_STORAGE, buffer);
+                return 1;
+            } else {
+                kfree(buffer);
+                deck_error(entry, DECK_PREFIX_STORAGE, 5);
+                return 0;
+            }
         }
 
         case EVENT_FILE_WRITE: {
@@ -181,11 +347,17 @@ int storage_deck_process(RoutingEntry* entry) {
             uint64_t size = *(uint64_t*)(event->data + 4);
             void* data = event->data + 12;
 
-            fs_write(fd, data, size);
-            deck_complete(entry, DECK_PREFIX_STORAGE, 0);
-            kprintf("[STORAGE] Event %lu: wrote %lu bytes to fd=%d\n",
-                    event->id, size, fd);
-            return 1;
+            // ✅ Real write
+            int bytes_written = fs_write(fd, data, size);
+            if (bytes_written >= 0) {
+                int* result = (int*)kmalloc(sizeof(int));
+                *result = bytes_written;
+                deck_complete(entry, DECK_PREFIX_STORAGE, result);
+                return 1;
+            } else {
+                deck_error(entry, DECK_PREFIX_STORAGE, 6);
+                return 0;
+            }
         }
 
         case EVENT_FILE_STAT: {
@@ -321,6 +493,11 @@ DeckContext storage_deck_context;
 
 void storage_deck_init(void) {
     deck_init(&storage_deck_context, "Storage", DECK_PREFIX_STORAGE, storage_deck_process);
+
+    // ✅ Initialize FD table
+    memset(fd_table, 0, sizeof(fd_table));
+    spinlock_init(&fd_table_lock);
+    kprintf("[STORAGE] FD table initialized (%d slots)\n", MAX_OPEN_FILES);
 
     // Initialize TagFS
     tagfs_init();

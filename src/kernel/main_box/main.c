@@ -8,6 +8,8 @@
 #include "gdt.h"
 #include "idt.h"
 #include "pic.h"
+#include "ata.h"
+#include "tagfs.h"
 #include "eventdriven_system.h"
 #include "eventdriven_demo.h"
 
@@ -62,6 +64,14 @@ void kernel_main(void) {
     vmm_init();
     vmm_test_basic();
     kprintf("%[S] Virtual memory manager initialized%[D]\n");
+
+    // === STORAGE SYSTEM INITIALIZATION ===
+    kprintf("\n%[H]=== Initializing Storage System ===%[D]\n");
+    ata_init();
+    kprintf("%[S] ATA disk driver initialized%[D]\n");
+
+    tagfs_init();
+    kprintf("%[S] TagFS filesystem initialized%[D]\n");
 
     // === ТЕСТ GDT ===
     kprintf("\n%[H]=== Step 1: GDT Setup ===%[D]\n");
