@@ -43,12 +43,29 @@ void asm_stop(){
 
 
 void kernel_main(void) {
-    e820_set_entries((e820_entry_t*)0x90000, *(uint16_t*)0x8FFE);
+    // Debug: kernel_main started
+    write_port(0x3f8, 'M');
+    write_port(0x3f8, '1');
+
+    e820_set_entries((e820_entry_t*)0x500, *(uint16_t*)0x4FE);  // Updated E820 addresses
+
+    write_port(0x3f8, 'M');
+    write_port(0x3f8, '2');
+
     vga_init();
+
+    write_port(0x3f8, 'M');
+    write_port(0x3f8, '3');
+
     kprintf("%[S]BoxOS Starting...%[D]\n");
-    
+
+    write_port(0x3f8, 'M');
+    write_port(0x3f8, '4');
 
     kprintf("%[H]Initializing core systems...%[D]\n\n");
+
+    write_port(0x3f8, 'M');
+    write_port(0x3f8, '5');
     
     enable_fpu();
     kprintf("%[S] FPU enabled%[D]\n");

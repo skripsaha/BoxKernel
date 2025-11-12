@@ -57,44 +57,18 @@ _start:
     mov dx, 0x3f8
     out dx, al
 
-    ; Подготовка параметров для ядра (ПОСЛЕ очистки BSS!)
-    mov rdi, 0x500               ; Адрес e820 карты (обновлен с 0x90000)
-    movzx rsi, word [0x4FE]      ; Кол-во записей E820 (обновлен с 0x8FFE)
-    mov rdx, 0x100000            ; Начало доступной памяти (1MB)
-
-    ; call pick_user_experience
-
-    ; ; Вызов анимации загрузки для красоты
-    ; call loading_animation
-
-    ; call check_hyperthreading
-    ; cmp eax, 1
-    ; ja .ht_active
-    ; ; HT неактивен или не поддерживается
-    ; jmp .ht_inactive
-
-    ; .ht_active:
-    ;     ; Отображаем вопрос
-    ;     mov rdi, htt_good
-    ;     mov ah, 0x0F
-    ;     mov rcx, 1650 ; Позиция
-    ;     call print_string_vga
-    
-    ; .ht_inactive:
-    ;     ; Отображаем вопрос
-    ;     mov rdi, htt_bad
-    ;     mov ah, 0x0F
-    ;     mov rcx, 1650 ; Позиция
-    ;     call print_string_vga
-
-        
-    ; ; Hyper-Threading активен, в EAX количество логических процессоров на ядро
-    ; ; Можно использовать для инициализации планировщика
-
-    ; call delay
+    ; Debug: About to call kernel_main
+    mov al, 'C'
+    mov dx, 0x3f8
+    out dx, al
 
     ; Вызов main функции ядра
     call kernel_main
+
+    ; Debug: Returned from kernel_main
+    mov al, 'R'
+    mov dx, 0x3f8
+    out dx, al
     
     ; Остановка если ядро вернулось
     cli
