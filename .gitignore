@@ -1,0 +1,26 @@
+# Build output
+build/
+*.o
+*.bin
+*.elf
+*.img
+*.iso
+*.vdi
+
+# QEMU logs
+*.log
+
+# Editor temporary files
+*~
+*.swp
+*.swo
+.vscode/
+.idea/
+*.bak
+
+# OS specific
+.DS_Store
+Thumbs.db
+
+# Debug symbols
+*.sym

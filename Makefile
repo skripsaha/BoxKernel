@@ -1,4 +1,9 @@
-# BoxOS Makefile — ISO, img, ELF, VDI, floppy
+# ===================================================================
+# BoxOS Makefile - Cross-platform OS build system
+# ===================================================================
+# Builds: disk image, floppy image, ISO, VDI, ELF with debug symbols
+# Supports: Linux, macOS, Windows (Cygwin/MSYS2)
+# ===================================================================
 
 UNAME_S := $(shell uname -s)
 
@@ -27,9 +32,19 @@ OBJCOPY  = objcopy
 QEMU     = qemu-system-x86_64
 
 # ==== FLAGS ====
+# === BUILD CONFIGURATION ===
+# Bootloader layout:
+#   Sector 1     : Stage1 (512 bytes, MBR)
+#   Sectors 2-10 : Stage2 (9 sectors = 4608 bytes)
+#   Sectors 11+  : Kernel (200 sectors = 102400 bytes = 100KB)
+STAGE2_SECTORS      = 9
+KERNEL_SECTORS      = 200
+KERNEL_MAX_BYTES    = 102400    # 200 * 512
+KERNEL_START_SECTOR = 10
+
 ASMFLAGS       =  -g -f bin
 ASMFLAGS_ELF   = -g -f elf64
-CFLAGS         = -g -m64 -ffreestanding -nostdlib
+CFLAGS         = -g -m64 -ffreestanding -nostdlib -Wall -Wextra
 INCLUDE_DIRS   := $(shell find src -type d)
 CFLAGS         += $(addprefix -I,$(INCLUDE_DIRS))
 LDFLAGS        = -g -T $(ENTRYDIR)/linker.ld -nostdlib -z max-page-size=0x1000 --oformat=binary
@@ -117,9 +132,11 @@ $(KERNEL_ENTRY_OBJ): $(KERNEL_ENTRY_SRC) | $(BUILDDIR)
 $(KERNEL_BIN): $(KERNEL_ENTRY_OBJ) $(C_OBJS) $(ASM_OBJS)
 	@echo "Linking kernel (raw binary)..."
 	@$(LD) $(LDFLAGS) -o $@ $^
-	@echo "Kernel size: $$(stat -c%s $@) bytes"
-	@if [ $$(stat -c%s $@) -gt 28672 ]; then \
-		echo "WARNING: Kernel exceeds stage2 limit (28KB)"; \
+	@echo "Kernel size: $$(stat -c%s $@) bytes (max: $(KERNEL_MAX_BYTES) bytes)"
+	@if [ $$(stat -c%s $@) -gt $(KERNEL_MAX_BYTES) ]; then \
+		echo "ERROR: Kernel exceeds $(KERNEL_SECTORS) sectors ($(KERNEL_MAX_BYTES) bytes)!"; \
+		echo "Current size: $$(stat -c%s $@) bytes"; \
+		exit 1; \
 	fi
 
 $(KERNEL_ELF): $(KERNEL_ENTRY_OBJ) $(C_OBJS) $(ASM_OBJS)
@@ -129,18 +146,23 @@ $(KERNEL_ELF): $(KERNEL_ENTRY_OBJ) $(C_OBJS) $(ASM_OBJS)
 
 # ==== DISK IMAGES ====
 $(IMAGE): $(STAGE1_BIN) $(STAGE2_BIN) $(KERNEL_BIN)
-	@echo "Creating disk image..."
+	@echo "Creating disk image (10MB)..."
 	@dd if=/dev/zero of=$@ bs=512 count=20480 status=none
+	@echo "  Writing Stage1 (sector 0, 512 bytes)..."
 	@dd if=$(STAGE1_BIN) of=$@ bs=512 conv=notrunc status=none
+	@echo "  Writing Stage2 (sectors 1-9, $(STAGE2_SECTORS) sectors)..."
 	@dd if=$(STAGE2_BIN) of=$@ bs=512 seek=1 conv=notrunc status=none
-	@dd if=$(KERNEL_BIN) of=$@ bs=512 seek=10 conv=notrunc status=none
+	@echo "  Writing Kernel (sector $(KERNEL_START_SECTOR)+, $(KERNEL_SECTORS) sectors)..."
+	@dd if=$(KERNEL_BIN) of=$@ bs=512 seek=$(KERNEL_START_SECTOR) conv=notrunc status=none
+	@echo "Disk image created: $(IMAGE)"
 
 $(FLOPPY_IMG): $(STAGE1_BIN) $(STAGE2_BIN) $(KERNEL_BIN)
-	@echo "Creating floppy-compatible image..."
+	@echo "Creating floppy image (1.44MB)..."
 	@dd if=/dev/zero of=$@ bs=512 count=2880 status=none
 	@dd if=$(STAGE1_BIN) of=$@ bs=512 conv=notrunc status=none
 	@dd if=$(STAGE2_BIN) of=$@ bs=512 seek=1 conv=notrunc status=none
-	@dd if=$(KERNEL_BIN) of=$@ bs=512 seek=10 conv=notrunc status=none
+	@dd if=$(KERNEL_BIN) of=$@ bs=512 seek=$(KERNEL_START_SECTOR) conv=notrunc status=none
+	@echo "Floppy image created: $(FLOPPY_IMG)"
 
 $(ISO): $(FLOPPY_IMG)
 	@echo "Creating ISO image..."

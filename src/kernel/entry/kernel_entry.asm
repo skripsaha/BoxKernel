@@ -48,8 +48,19 @@ _start:
     mov dx, 0x3f8
     out dx, al
 
-    ; NOTE: BSS zeroing перенесен в kernel_main для безопасности
-    ; Причина: в этот момент paging может не покрывать всю область BSS
+    ; === CRITICAL: Zero out BSS section ===
+    ; All uninitialized global variables must be zeroed
+    mov rdi, __bss_start
+    mov rcx, __bss_end
+    sub rcx, rdi                ; RCX = size of BSS in bytes
+    shr rcx, 3                  ; Divide by 8 (we're clearing 8 bytes at a time)
+    xor rax, rax                ; RAX = 0
+    rep stosq                   ; Zero out BSS
+
+    ; Debug message after BSS zeroing
+    mov al, 'B'
+    mov dx, 0x3f8
+    out dx, al
 
     ; call pick_user_experience
 
@@ -398,254 +409,18 @@ hide_cursor:
     out dx, al
     ret
 
-loading_anim_entry_msg db "BoxOS loading..." , 0, 0
-msg_pick_newbie db "I am newbie" , 0, 0
-msg_pick_programmer db "I am programmer", 0, 0
-msg_pick_gamer db "I am gamer", 0, 0
-msg_pick_level_question db "What's your current level?", 0, 0
-htt_good db "HTT is okay bro!", 0, 0
-htt_bad db "HTT don't available!", 0, 0
+; === DATA SECTION ===
+loading_anim_entry_msg db "BoxOS loading..." , 0
+msg_pick_newbie db "I am newbie" , 0
+msg_pick_programmer db "I am programmer", 0
+msg_pick_gamer db "I am gamer", 0
+msg_pick_level_question db "What's your current level?", 0
+htt_good db "HTT is okay bro!", 0
+htt_bad db "HTT don't available!", 0
 msg_pick_tip db "Use ", 0x1A, " and ", 0x1B, " to choose the right one", 0
-
 
 user_experience_level db 0
 
-; Переменные
+; === BSS SECTION ===
 section .bss
 current_selection resb 1
-;user_experience_level resb 1
-
-
-
-
-
-
-
-
-; [BITS 64]
-; [EXTERN kernel_main]
-; [EXTERN pmm_init]
-
-; section .text
-; global _start
-
-; global write_port
-; global read_port
-
-; global get_gdt_base
-
-; global clear_screen_vga
-
-; _start:
-;     ; Отладочное сообщение через последовательный порт
-;     mov al, 'K'
-;     mov dx, 0x3f8
-;     out dx, al
-    
-;     ; Очистка сегментных регистров
-;     xor ax, ax
-;     mov ds, ax
-;     mov es, ax
-;     mov fs, ax
-;     mov gs, ax
-   
-;     ; Настройка стека
-;     mov rsp, 0x90000
-;     mov rbp, rsp
-    
-;     ; Еще одно отладочное сообщение
-;     mov al, 'S'
-;     mov dx, 0x3f8
-;     out dx, al
-   
-;     ; Подготовка параметров для ядра
-;     mov rdi, 0x90000             ; Адрес e820 карты
-;     movzx rsi, word [0x8FFE]     ; Размер e820 карты в байтах
-;     mov rdx, 0x100000            ; Начало доступной памяти (1MB)
-
-;     mov al, 'M'
-;     mov dx, 0x3f8
-;     out dx, al
-    
-;     call pick_user_experience
-
-;     ; Вызов анимации загрузки для красоты
-;     call loading_animation
-
-;     ; Вызов main функции ядра
-;     call kernel_main
-    
-;     ; Остановка если ядро вернулось
-;     cli
-;     hlt
-;     jmp $
-
-; pick_user_experience:
-;     call clear_screen_vga
-
-;     mov rdi, msg_pick_level_question
-;     mov ah, 0x0F
-;     mov rcx, 1492 ; Позиция
-;     call print_string_vga
-
-;     mov rdi, msg_pick_newbie
-;     mov ah, 0x8F
-;     mov rcx, 1966 ; Позиция
-;     call print_string_vga
-
-;     mov rdi, msg_pick_programmer
-;     mov ah, 0x3F
-;     mov rcx, 2002 ; Позиция
-;     call print_string_vga
-
-
-;     cli
-;     hlt
-
-
-; loading_animation:
-;     call clear_screen_vga ; Очищаем экран
-
-;     mov rdi, loading_anim_entry_msg ; Строка
-;     mov rcx, 1986 ; Позиция
-;     call print_string_vga
-
-;     mov edi, 0xB8000
-;     add edi, 1810 ; Середина для 30 клеток загрузки
-;     mov ecx, 0
-;     mov rbx, 80000000 ; Грубо - длина задержки
-
-
-; _loop_start:
-
-;     call delay ; Вызываем задержку при итерации
-;     mov al, ' '
-;     mov ah, 0x2F ; Зеленая ячейка
-;     mov [edi], ax
-;     add edi, 2
-
-;     inc ecx
-;     cmp ecx, 30
-;     jl _loop_start
-
-;     call delay
-
-
-
-; write_port:
-;     mov dx, di      ; порт (в 1-м аргументе — rdi)
-;     mov al, sil     ; байт данных (в 2-м аргументе — sil)
-;     out dx, al
-;     ret
-
-
-; read_port:
-;     mov dx, di      ; порт (в rdi)
-;     in al, dx
-;     movzx eax, al   ; расширение до 32 бит без знака
-;     ret
-
-; ; Получить базовый адрес GDT
-
-; get_gdt_base:
-
-;     ; Временный буфер для GDTR
-;     sub rsp, 16
-;     sgdt [rsp]
-    
-;     ; Загружаем базовый адрес (8 байт) из GDTR
-;     mov rax, [rsp + 2]  ; Пропускаем limit (2 байта), берем base
-    
-;     add rsp, 16
-;     ret
-
-
-; ; Загрузить новый GDT
-; global load_gdt
-
-; load_gdt:
-;     lgdt [rdi]
-    
-;     ; Перезагружаем сегментные регистры
-;     mov ax, 0x20        ; Kernel data segment
-;     mov ds, ax
-;     mov es, ax
-;     mov fs, ax
-;     mov gs, ax
-;     mov ss, ax
-    
-;     ; Перезагружаем CS через far return
-;     push 0x18           ; Kernel code segment
-;     lea rax, [rel .reload_cs]
-;     push rax
-;     retfq
-    
-; .reload_cs:
-;     ret
-
-; ; Полезные функции
-; delay:
-;     push rcx ; Сохраняем rcx
-;     mov rcx, rbx ; Передаем длительность задержки (грубо кол-во итераций)
-; .delay_loop:
-;     nop ; Пустая инструкция (иллюзия ожидания)
-;     loop .delay_loop
-;     pop rcx ; Восстанавливаем rcx
-;     ret 
-
-; ; VGA Функции
-; print_string_vga:
-;     ; Сохраняем регистры
-;     push rdi
-;     push rbx
-;     push rax
-;     push rcx
-
-;     mov rbx, 0xB8000
-;     add rbx, rcx
-;     mov ah, ah
-
-; .print_loop:
-;     mov al, [rdi]
-;     test al, al
-;     jz .done
-
-;     mov [rbx], ax
-;     add rbx, 2
-
-;     inc rdi
-
-;     jmp .print_loop
-
-; .done:
-;     pop rcx
-;     pop rax
-;     pop rbx
-;     pop rdi
-;     ret
-
-
-; clear_screen_vga:
-;     ; Сохраняем регистры
-;     push rdi
-;     push rcx
-;     push rax
-
-;     mov rdi, 0xB8000
-;     mov rcx, 2000
-
-;     mov al, ' '
-;     mov ah, 0x07
-
-;     rep stosw
-
-;     pop rax
-;     pop rcx
-;     pop rdi
-;     ret
-
-; loading_anim_entry_msg db "BoxOS loading..." , 0, 0
-; msg_pick_newbie db "I'm newbie" , 0, 0
-; msg_pick_programmer db "I'm programmer", 0, 0
-; msg_pick_level_question db "What's your current level?", 0, 0
-
