@@ -206,9 +206,10 @@ Task* task_spawn_with_args(const char* name, void* entry_point, void* args, uint
     task->entry_point = entry_point;
     task->args = args;  // Save arguments
 
-    // TODO: Create separate page table for task
-    // For now, use kernel page table
-    task->page_table = 0;
+    // Use kernel page table for all tasks (no isolation in v1)
+    // Future: Create separate page table per task for memory isolation
+    vmm_context_t* kernel_ctx = vmm_get_kernel_context();
+    task->page_table = kernel_ctx->pml4_phys;
 
     // === CPU CONTEXT ===
     // Initialize context for first run
@@ -229,7 +230,15 @@ Task* task_spawn_with_args(const char* name, void* entry_point, void* args, uint
     task->last_progress_time = task->creation_time;
 
     // === COMMUNICATION ===
-    task->message_queue = NULL;  // TODO: Allocate message queue
+    // Allocate message queue
+    task->message_queue = (TaskMessageQueue*)kmalloc(sizeof(TaskMessageQueue));
+    if (!task->message_queue) {
+        kprintf("[TASK] ⚠️  Failed to allocate message queue for task '%s'\n", name);
+        vfree(task->stack_base);
+        kfree(task);
+        return NULL;
+    }
+    memset(task->message_queue, 0, sizeof(TaskMessageQueue));
     task->pending_messages = 0;
 
     // Add to task table

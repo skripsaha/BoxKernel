@@ -14,19 +14,8 @@ RoutingTable global_routing_table;
 void routing_table_init(RoutingTable* table) {
     kprintf("[ROUTING_TABLE] Initializing...\n");
 
-    // Очищаем все buckets
-    for (uint64_t i = 0; i < ROUTING_TABLE_SIZE; i++) {
-        table->buckets[i].lock = 0;
-        table->buckets[i].count = 0;
-
-        for (int j = 0; j < BUCKET_CAPACITY; j++) {
-            table->buckets[i].entries[j].event_id = 0;
-            table->buckets[i].entries[j].state = 0;
-        }
-    }
-
-    table->total_entries = 0;
-    table->collisions = 0;
+    // Быстрая инициализация через memset
+    memset(table, 0, sizeof(RoutingTable));
 
     kprintf("[ROUTING_TABLE] Initialized (size=%d buckets, capacity=%d entries)\n",
             ROUTING_TABLE_SIZE, ROUTING_TABLE_SIZE * BUCKET_CAPACITY);

@@ -10,8 +10,8 @@
 // ============================================================================
 
 // Размер hash table (должен быть степенью 2)
-// Уменьшено до 512 для экономии памяти
-#define ROUTING_TABLE_SIZE 512
+// Уменьшено до 64 для экономии памяти и быстрой инициализации
+#define ROUTING_TABLE_SIZE 64
 #define ROUTING_TABLE_MASK (ROUTING_TABLE_SIZE - 1)
 
 _Static_assert((ROUTING_TABLE_SIZE & (ROUTING_TABLE_SIZE - 1)) == 0,
