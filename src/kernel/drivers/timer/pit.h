@@ -27,6 +27,9 @@
 // Initialize PIT to generate interrupts at specified frequency
 void pit_init(uint32_t frequency_hz);
 
+// Increment tick counter (called from IRQ 0 handler)
+void pit_tick(void);
+
 // Get current tick count (updated by IRQ 0 handler)
 uint64_t pit_get_ticks(void);
 

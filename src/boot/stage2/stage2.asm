@@ -18,9 +18,9 @@
 ; 0x7C00      - Stage1 (512 bytes)
 ; 0x8000      - Stage2 (4096 bytes) - THIS CODE
 ; 0x9000      - Boot info for kernel (256 bytes)
-; 0x10000     - Kernel (135680 bytes = 265 sectors = 132.5KB)
-; 0x31200     - End of kernel
-; 0x31200     - BSS section (3.9MB uninitialized data)
+; 0x10000     - Kernel (136192 bytes = 266 sectors = 133KB)
+; 0x31400     - End of kernel
+; 0x31400     - BSS section (3.9MB uninitialized data)
 ; 0x3EF000    - End of BSS (~4MB mark)
 ; 0x500000    - Page tables (16KB: PML4, PDPT, PD, PT) - MOVED ABOVE BSS!
 ; 0x510000    - Stack for 32/64-bit modes (grows downward) - MOVED ABOVE BSS!
@@ -28,9 +28,9 @@
 ; === CONSTANTS ===
 KERNEL_LOAD_ADDR      equ 0x10000
 KERNEL_SECTOR_START   equ 10
-KERNEL_SECTOR_COUNT   equ 265
-KERNEL_SIZE_BYTES     equ 135680        ; 265 * 512
-KERNEL_END_ADDR       equ 0x31200       ; 0x10000 + 0x21200 (135680 bytes)
+KERNEL_SECTOR_COUNT   equ 266
+KERNEL_SIZE_BYTES     equ 136192        ; 266 * 512
+KERNEL_END_ADDR       equ 0x31400       ; 0x10000 + 0x21400 (136192 bytes)
 
 PAGE_TABLE_BASE       equ 0x500000      ; MOVED: Above kernel BSS (was 0x70000)
 E820_MAP_ADDR         equ 0x500         ; Low memory (safe after BIOS data area)
@@ -421,7 +421,7 @@ load_kernel_simple:
     jc .use_chs          ; Если не поддерживается, используем CHS
 
     ; Используем INT 13h Extensions (LBA)
-    ; Загружаем 265 секторов (132.5KB) начиная с LBA 10
+    ; Загружаем 266 секторов (133KB) начиная с LBA 10
 
     ; Часть 1: 127 секторов
     mov si, dap1
@@ -437,7 +437,7 @@ load_kernel_simple:
     int 0x13
     jc .disk_error
 
-    ; Часть 3: 11 секторов (remaining: 265 - 127 - 127 = 11)
+    ; Часть 3: 12 секторов (remaining: 266 - 127 - 127 = 12)
     mov si, dap3
     mov ah, 0x42
     mov dl, 0x80
@@ -787,7 +787,7 @@ align 4
 dap3:
     db 0x10             ; DAP size (16 bytes)
     db 0                ; Reserved
-    dw 11               ; Sector count: 11 (265 - 127 - 127 = 11)
+    dw 12               ; Sector count: 12 (266 - 127 - 127 = 12)
     dw 0x0000           ; Offset
     dw 0x2FC0           ; Segment (0x2FC0:0x0000 = 0x2FC00 physical)
     dq 264              ; Starting LBA sector: 264 (10 + 127 + 127)
@@ -800,8 +800,8 @@ msg_e820_success      db '[OK] E820 memory map created', 13, 10, 0
 msg_e820_fail         db '[WARN] E820 failed, using fallback', 13, 10, 0
 msg_memory_fallback   db '[OK] Fallback memory detection', 13, 10, 0
 msg_memory_error      db '[ERROR] Memory detection failed!', 13, 10, 0
-msg_loading_kernel    db 'Loading kernel (265 sectors)...', 13, 10, 0
-msg_kernel_loaded     db '[OK] Kernel loaded (132.5KB)', 13, 10, 0
+msg_loading_kernel    db 'Loading kernel (266 sectors)...', 13, 10, 0
+msg_kernel_loaded     db '[OK] Kernel loaded (133KB)', 13, 10, 0
 msg_kernel_empty      db '[WARN] Kernel appears empty', 13, 10, 0
 msg_disk_error        db '[ERROR] Disk read failed!', 13, 10, 0
 msg_long_mode_ok      db '[OK] CPU supports 64-bit mode', 13, 10, 0
