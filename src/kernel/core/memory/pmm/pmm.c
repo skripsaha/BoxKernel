@@ -49,11 +49,16 @@ void pmm_init(void) {
 
     // Find the highest usable RAM address
     uintptr_t mem_end = 0;
+    kprintf("[PMM] DEBUG: Scanning %zu entries for usable RAM...\n", entry_count);
     for (size_t i = 0; i < entry_count; i++) {
+        kprintf("[PMM] Entry %zu: base=0x%llx len=0x%llx type=%u\n",
+                i, entries[i].base, entries[i].length, entries[i].type);
         if (entries[i].type == E820_USABLE && entries[i].length > 0) {
+            kprintf("[PMM] --> USABLE!\n");
             uintptr_t region_end = entries[i].base + entries[i].length;
             if (region_end > mem_end) {
                 mem_end = region_end;
+                kprintf("[PMM] --> New mem_end = 0x%llx\n", (unsigned long long)mem_end);
             }
         }
     }
