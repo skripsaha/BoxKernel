@@ -13,15 +13,28 @@
 #endif
 
 // ========== BOOLEAN TYPE ==========
+// C23 and later have bool as a keyword, older C standards need typedef
 #ifndef __cplusplus
-typedef _Bool bool;
-#define true  1
-#define false 0
+    // Check if bool is already defined (C23+)
+    #if !defined(bool) && (!defined(__STDC_VERSION__) || __STDC_VERSION__ < 202300L)
+        typedef _Bool bool;
+    #endif
+
+    #ifndef true
+        #define true  1
+    #endif
+
+    #ifndef false
+        #define false 0
+    #endif
 #else
-// C++ has built-in bool
-#define bool  bool
-#define true  true
-#define false false
+    // C++ has built-in bool
+    #ifndef true
+        #define true  true
+    #endif
+    #ifndef false
+        #define false false
+    #endif
 #endif
 
 #define __bool_true_false_are_defined 1
