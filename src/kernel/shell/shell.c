@@ -7,6 +7,7 @@
 #include "cpu.h"
 #include "pmm.h"
 #include "vmm.h"
+#include "io.h"
 
 // ============================================================================
 // SHELL STATE
@@ -15,27 +16,49 @@
 static char input_buffer[SHELL_INPUT_BUFFER_SIZE];
 static uint32_t input_pos = 0;
 
+// Current user (simple implementation)
+static char current_user[32] = "root";
+
+// ============================================================================
+// COMMAND DECLARATIONS
+// ============================================================================
+
+int cmd_help(int argc, char** argv);
+int cmd_create(int argc, char** argv);
+int cmd_eye(int argc, char** argv);
+int cmd_trash(int argc, char** argv);
+int cmd_erase(int argc, char** argv);
+int cmd_info(int argc, char** argv);
+int cmd_tag(int argc, char** argv);
+int cmd_untag(int argc, char** argv);
+int cmd_restore(int argc, char** argv);
+int cmd_edit(int argc, char** argv);
+int cmd_reboot(int argc, char** argv);
+int cmd_say(int argc, char** argv);
+int cmd_use(int argc, char** argv);
+int cmd_byebye(int argc, char** argv);
+int cmd_ls(int argc, char** argv);
+
 // ============================================================================
 // COMMAND TABLE
 // ============================================================================
 
 static shell_command_t commands[] = {
     {"help", "Show available commands", cmd_help},
-    {"clear", "Clear the screen", cmd_clear},
-    {"echo", "Print text to console", cmd_echo},
-    {"ls", "List files (tag-based)", cmd_ls},
-    {"cat", "Display file contents", cmd_cat},
-    {"touch", "Create file with tags", cmd_touch},
-    {"rm", "Remove file by name", cmd_rm},
-    {"create", "Create file with content", cmd_create},
-    {"eye", "View file contents (like cat)", cmd_eye},
-    {"use", "Set tag context filter", cmd_use},
+    {"create", "Create file with content and tags", cmd_create},
+    {"eye", "View file contents", cmd_eye},
     {"trash", "Move file to trash", cmd_trash},
     {"erase", "Permanently delete file", cmd_erase},
-    {"restore", "Restore file from trash", cmd_restore},
-    {"ps", "List running tasks", cmd_ps},
     {"info", "Show system information", cmd_info},
+    {"tag", "Add tag to file", cmd_tag},
+    {"untag", "Remove tag from file", cmd_untag},
+    {"restore", "Restore file from trash", cmd_restore},
+    {"edit", "Open text editor", cmd_edit},
     {"reboot", "Reboot the system", cmd_reboot},
+    {"say", "Print text to console", cmd_say},
+    {"use", "Set tag context filter", cmd_use},
+    {"byebye", "Shutdown system", cmd_byebye},
+    {"ls", "List files", cmd_ls},
     {NULL, NULL, NULL}  // Sentinel
 };
 
@@ -44,7 +67,7 @@ static shell_command_t commands[] = {
 // ============================================================================
 
 static void shell_print_prompt(void) {
-    kprintf("%[H]%s%[D]", SHELL_PROMPT);
+    kprintf("%[H]%s@boxos%[D]:%[S]~%[D]$ ", current_user);
 }
 
 static int shell_parse_command(char* input, char** argv) {
@@ -73,11 +96,10 @@ void shell_init(void) {
     input_pos = 0;
 
     kprintf("\n");
-    kprintf("%[S]╔══════════════════════════════════════════════════════╗%[D]\n");
-    kprintf("%[S]║          Welcome to BoxOS Shell v1.0                ║%[D]\n");
-    kprintf("%[S]╚══════════════════════════════════════════════════════╝%[D]\n");
-    kprintf("\n");
-    kprintf("Type '%[H]help%[D]' for available commands.\n");
+    kprintf("%[S]=====================================================%[D]\n");
+    kprintf("%[S]         Welcome to BoxOS Shell v2.0               %[D]\n");
+    kprintf("%[S]         Type 'help' for available commands        %[D]\n");
+    kprintf("%[S]=====================================================%[D]\n");
     kprintf("\n");
 }
 
@@ -99,16 +121,13 @@ void shell_run(void) {
         if (c == '\n') {
             // Execute command
             kprintf("\n");
+            input_buffer[input_pos] = '\0';
 
             if (input_pos > 0) {
-                input_buffer[input_pos] = '\0';
-
-                // Parse command
                 char* argv[SHELL_MAX_ARGS];
                 int argc = shell_parse_command(input_buffer, argv);
 
                 if (argc > 0) {
-                    // Find and execute command
                     int found = 0;
                     for (int i = 0; commands[i].name != NULL; i++) {
                         if (strcmp(argv[0], commands[i].name) == 0) {
@@ -119,23 +138,22 @@ void shell_run(void) {
                     }
 
                     if (!found) {
-                        kprintf("%[E]Error: Unknown command '%s'%[D]\n", argv[0]);
+                        kprintf("%[E]Unknown command: %s%[D]\n", argv[0]);
                         kprintf("Type '%[H]help%[D]' for available commands.\n");
                     }
                 }
-
-                input_pos = 0;
             }
 
+            input_pos = 0;
             shell_print_prompt();
+
         } else if (c == '\b') {
             // Backspace
             if (input_pos > 0) {
                 input_pos--;
-                kprintf("\b \b");  // Erase character on screen
+                kprintf("\b \b");
             }
         } else if (input_pos < SHELL_INPUT_BUFFER_SIZE - 1) {
-            // Add character to buffer
             input_buffer[input_pos++] = c;
             kprintf("%c", c);
         }
@@ -150,11 +168,11 @@ int cmd_help(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
-    kprintf("\n%[H]Available Commands:%[D]\n");
-    kprintf("═══════════════════════════════════════════════════\n");
+    kprintf("\n%[H]BoxOS Shell Commands:%[D]\n");
+    kprintf("=======================================================\n");
 
     for (int i = 0; commands[i].name != NULL; i++) {
-        kprintf("  %[H]%s%[D] - %s\n", commands[i].name, commands[i].description);
+        kprintf("  %[H]%-12s%[D] - %s\n", commands[i].name, commands[i].description);
     }
 
     kprintf("\n");
@@ -162,22 +180,10 @@ int cmd_help(int argc, char** argv) {
 }
 
 // ============================================================================
-// COMMAND: clear
+// COMMAND: say (like echo)
 // ============================================================================
 
-int cmd_clear(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
-
-    vga_clear_screen();
-    return 0;
-}
-
-// ============================================================================
-// COMMAND: echo
-// ============================================================================
-
-int cmd_echo(int argc, char** argv) {
+int cmd_say(int argc, char** argv) {
     for (int i = 1; i < argc; i++) {
         kprintf("%s", argv[i]);
         if (i < argc - 1) kprintf(" ");
@@ -194,12 +200,12 @@ int cmd_ls(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
-    kprintf("\n%[H]Filesystem Contents (Tag-Based):%[D]\n");
-    kprintf("════════════════════════════════════════════════════════════════════\n");
-    kprintf("%-8s %-20s %-10s %s\n", "Inode", "Name", "Size", "Tags");
-    kprintf("────────────────────────────────────────────────────────────────────\n");
+    kprintf("\n%[H]Files:%[D]\n");
+    kprintf("=======================================================\n");
+    kprintf("%-8s  %-20s  %-10s  %s\n", "Inode", "Name", "Size", "Tags");
+    kprintf("-------------------------------------------------------\n");
 
-    // Access inode table directly (we're in kernel mode)
+    // Access inode table directly
     extern TagFSContext global_tagfs;
     uint32_t file_count = 0;
 
@@ -211,8 +217,25 @@ int cmd_ls(int argc, char** argv) {
             continue;
         }
 
+        // Check if in trash (skip if trashed)
+        int is_trashed = 0;
+        for (uint32_t t = 0; t < inode->tag_count; t++) {
+            if (strcmp(inode->tags[t].key, "trashed") == 0 &&
+                strcmp(inode->tags[t].value, "true") == 0) {
+                is_trashed = 1;
+                break;
+            }
+        }
+        if (is_trashed) continue;
+
+        // Check context filter
+        if (!tagfs_context_matches(i)) {
+            continue;
+        }
+
         // Get filename from name tag
-        char filename[TAGFS_TAG_VALUE_SIZE] = "<unnamed>";
+        char filename[TAGFS_TAG_VALUE_SIZE];
+        strncpy(filename, "<unnamed>", TAGFS_TAG_VALUE_SIZE);
         for (uint32_t t = 0; t < inode->tag_count; t++) {
             if (strcmp(inode->tags[t].key, "name") == 0) {
                 strncpy(filename, inode->tags[t].value, TAGFS_TAG_VALUE_SIZE);
@@ -221,14 +244,16 @@ int cmd_ls(int argc, char** argv) {
         }
 
         // Print file info
-        kprintf("%-8lu %-20s %-10lu ", inode->inode_id, filename, inode->size);
+        kprintf("%-8lu  %-20s  %-10lu  [", inode->inode_id, filename, inode->size);
 
-        // Print tags
-        kprintf("[");
+        // Print tags (skip name and trashed tags)
+        int tag_printed = 0;
         for (uint32_t t = 0; t < inode->tag_count && t < 3; t++) {
-            if (strcmp(inode->tags[t].key, "name") != 0) {  // Skip name tag
+            if (strcmp(inode->tags[t].key, "name") != 0 &&
+                strcmp(inode->tags[t].key, "trashed") != 0) {
+                if (tag_printed) kprintf(", ");
                 kprintf("%s:%s", inode->tags[t].key, inode->tags[t].value);
-                if (t < inode->tag_count - 1) kprintf(", ");
+                tag_printed = 1;
             }
         }
         if (inode->tag_count > 3) kprintf("...");
@@ -241,194 +266,282 @@ int cmd_ls(int argc, char** argv) {
         kprintf("(no files)\n");
     }
 
-    kprintf("\nTotal files: %u\n\n", file_count);
+    kprintf("\nTotal: %u files\n\n", file_count);
     return 0;
 }
 
 // ============================================================================
-// COMMAND: cat
+// COMMAND: create
 // ============================================================================
 
-int cmd_cat(int argc, char** argv) {
+int cmd_create(int argc, char** argv) {
     if (argc < 2) {
-        kprintf("%[E]Usage: cat <filename>%[D]\n");
-        return 1;
+        kprintf("Usage: create <name> [--data <text>] [tag:value ...]\n");
+        return -1;
     }
 
-    // Find file by name tag
-    Tag name_tag;
-    strncpy(name_tag.key, "name", TAGFS_TAG_KEY_SIZE);
-    strncpy(name_tag.value, argv[1], TAGFS_TAG_VALUE_SIZE);
-
-    uint64_t inode_ids[16];
-    uint32_t count = 0;
-    int result = tagfs_query_single(&name_tag, inode_ids, &count, 16);
-
-    if (result < 0 || count == 0) {
-        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
-        return 1;
-    }
-
-    uint64_t inode_id = inode_ids[0];
-    FileInode* inode = tagfs_get_inode(inode_id);
-
-    if (!inode) {
-        kprintf("%[E]Failed to get inode: %lu%[D]\n", inode_id);
-        return 1;
-    }
-
-    kprintf("\n%[H]File: %s (inode=%lu, size=%lu bytes)%[D]\n",
-            argv[1], inode_id, inode->size);
-    kprintf("═══════════════════════════════════════════════════\n");
-
-    if (inode->size == 0) {
-        kprintf("(empty file)\n");
-    } else {
-        // Read file content (max 4KB for display)
-        uint8_t buffer[4096];
-        uint64_t read_size = (inode->size > 4096) ? 4096 : inode->size;
-
-        result = tagfs_read_file(inode_id, 0, buffer, read_size);
-
-        if (result < 0) {
-            kprintf("%[E]Failed to read file%[D]\n");
-            return 1;
-        }
-
-        // Print content (assuming text)
-        for (uint64_t i = 0; i < read_size; i++) {
-            kprintf("%c", buffer[i]);
-        }
-
-        if (inode->size > 4096) {
-            kprintf("\n... (truncated, file is %lu bytes) ...\n", inode->size);
-        }
-    }
-
-    kprintf("\n");
-    return 0;
-}
-
-// NOTE: mkdir removed - TagFS uses tags, not directories!
-
-// ============================================================================
-// COMMAND: touch
-// ============================================================================
-
-int cmd_touch(int argc, char** argv) {
-    if (argc < 2) {
-        kprintf("%[E]Usage: touch <filename> [tag1:value1] [tag2:value2] ...%[D]\n");
-        kprintf("Example: touch myfile.txt type:document format:txt\n");
-        return 1;
-    }
-
-    // Create tags array (filename + additional tags)
+    // Parse arguments
+    char* name = argv[1];
+    const char* data = NULL;
     Tag tags[TAGFS_MAX_TAGS_PER_FILE];
     uint32_t tag_count = 0;
 
-    // First tag: name:filename
+    // Add name tag
+    tags[tag_count].key[0] = '\0';
+    tags[tag_count].value[0] = '\0';
     strncpy(tags[tag_count].key, "name", TAGFS_TAG_KEY_SIZE);
-    strncpy(tags[tag_count].value, argv[1], TAGFS_TAG_VALUE_SIZE);
+    strncpy(tags[tag_count].value, name, TAGFS_TAG_VALUE_SIZE);
     tag_count++;
 
-    // Parse additional tags from command line
-    for (int i = 2; i < argc && tag_count < TAGFS_MAX_TAGS_PER_FILE; i++) {
-        Tag tag = tagfs_tag_from_string(argv[i]);
-        if (tag.key[0] != '\0') {  // Valid tag
-            tags[tag_count++] = tag;
+    // Parse remaining arguments
+    for (int i = 2; i < argc; i++) {
+        if (strcmp(argv[i], "--data") == 0 && i + 1 < argc) {
+            data = argv[i + 1];
+            i++;
+        } else {
+            // Parse tag (key:value)
+            char* colon = strchr(argv[i], ':');
+            if (colon && tag_count < TAGFS_MAX_TAGS_PER_FILE) {
+                *colon = '\0';
+                tags[tag_count].key[0] = '\0';
+                tags[tag_count].value[0] = '\0';
+                strncpy(tags[tag_count].key, argv[i], TAGFS_TAG_KEY_SIZE);
+                strncpy(tags[tag_count].value, colon + 1, TAGFS_TAG_VALUE_SIZE);
+                tag_count++;
+            }
         }
     }
 
     // Create file
-    uint64_t inode_id = tagfs_create_file(tags, tag_count);
+    uint64_t inode_id;
+    if (data) {
+        inode_id = tagfs_create_file_with_data(tags, tag_count,
+                                                (const uint8_t*)data, strlen(data));
+    } else {
+        inode_id = tagfs_create_file(tags, tag_count);
+    }
 
     if (inode_id == TAGFS_INVALID_INODE) {
-        kprintf("%[E]Failed to create file: %s%[D]\n", argv[1]);
-        return 1;
+        kprintf("%[E]Failed to create file%[D]\n");
+        return -1;
     }
 
-    kprintf("%[S]Created file '%s' (inode=%lu) with %u tags%[D]\n",
-            argv[1], inode_id, tag_count);
+    kprintf("%[S]Created file '%s' (inode %lu)%[D]\n", name, inode_id);
     return 0;
 }
 
 // ============================================================================
-// COMMAND: rm
+// COMMAND: eye
 // ============================================================================
 
-int cmd_rm(int argc, char** argv) {
+int cmd_eye(int argc, char** argv) {
     if (argc < 2) {
-        kprintf("%[E]Usage: rm <filename>%[D]\n");
-        return 1;
+        kprintf("Usage: eye <filename>\n");
+        return -1;
     }
 
-    // Find file by name tag
-    Tag name_tag;
-    strncpy(name_tag.key, "name", TAGFS_TAG_KEY_SIZE);
-    strncpy(name_tag.value, argv[1], TAGFS_TAG_VALUE_SIZE);
-
-    uint64_t inode_ids[16];
-    uint32_t count = 0;
-    int result = tagfs_query_single(&name_tag, inode_ids, &count, 16);
-
-    if (result < 0 || count == 0) {
+    // Find file by name
+    uint64_t inode_id = tagfs_find_by_name(argv[1]);
+    if (inode_id == TAGFS_INVALID_INODE) {
         kprintf("%[E]File not found: %s%[D]\n", argv[1]);
-        return 1;
+        return -1;
     }
 
-    // Delete first matching file (move to trash)
-    result = tagfs_trash_file(inode_ids[0]);
-
-    if (result < 0) {
-        kprintf("%[E]Failed to delete file: %s%[D]\n", argv[1]);
-        return 1;
+    // Read file content
+    uint64_t size;
+    uint8_t* content = tagfs_read_file_content(inode_id, &size);
+    if (!content) {
+        kprintf("%[E]Failed to read file%[D]\n");
+        return -1;
     }
 
-    kprintf("%[S]Moved to trash: %s (inode=%lu)%[D]\n", argv[1], inode_ids[0]);
+    // Print content
+    kprintf("\n");
+    for (uint64_t i = 0; i < size; i++) {
+        kprintf("%c", content[i]);
+    }
+    kprintf("\n\n");
+
+    kfree(content);
     return 0;
 }
 
 // ============================================================================
-// COMMAND: ps
+// COMMAND: trash
 // ============================================================================
 
-int cmd_ps(int argc, char** argv) {
-    (void)argc;
-    (void)argv;
+int cmd_trash(int argc, char** argv) {
+    if (argc < 2) {
+        kprintf("Usage: trash <filename>\n");
+        return -1;
+    }
 
-    kprintf("\n%[H]Running Tasks:%[D]\n");
-    kprintf("═══════════════════════════════════════════════════════════════════\n");
-    kprintf("ID     Name                 State        Energy   Health   Events\n");
-    kprintf("───────────────────────────────────────────────────────────────────\n");
+    uint64_t inode_id = tagfs_find_by_name(argv[1]);
+    if (inode_id == TAGFS_INVALID_INODE) {
+        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
+        return -1;
+    }
 
-    // Get all tasks
-    Task* tasks[256];
-    int count = task_enumerate(tasks, 256);
+    if (tagfs_trash_file(inode_id) != 0) {
+        kprintf("%[E]Failed to trash file%[D]\n");
+        return -1;
+    }
+
+    kprintf("%[S]Moved '%s' to trash%[D]\n", argv[1]);
+    return 0;
+}
+
+// ============================================================================
+// COMMAND: erase
+// ============================================================================
+
+int cmd_erase(int argc, char** argv) {
+    if (argc < 2) {
+        kprintf("Usage: erase <filename>\n");
+        kprintf("WARNING: This permanently deletes the file!\n");
+        return -1;
+    }
+
+    uint64_t inode_id = tagfs_find_by_name(argv[1]);
+    if (inode_id == TAGFS_INVALID_INODE) {
+        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
+        return -1;
+    }
+
+    kprintf("%[W]Are you sure you want to permanently delete '%s'? (y/n): %[D]", argv[1]);
+    kprintf("y\n");  // Auto-yes for now (TODO: add keyboard input)
+
+    if (tagfs_erase_file(inode_id) != 0) {
+        kprintf("%[E]Failed to erase file%[D]\n");
+        return -1;
+    }
+
+    kprintf("%[S]Permanently erased '%s'%[D]\n", argv[1]);
+    return 0;
+}
+
+// ============================================================================
+// COMMAND: restore
+// ============================================================================
+
+int cmd_restore(int argc, char** argv) {
+    if (argc < 2) {
+        kprintf("Usage: restore <filename>\n");
+        return -1;
+    }
+
+    // Find file (including trashed)
+    char tag_str[128];
+    ksnprintf(tag_str, sizeof(tag_str), "name:%s", argv[1]);
+    Tag name_tag = tagfs_tag_from_string(tag_str);
+
+    uint64_t result_inodes[256];
+    uint32_t count = 0;
+    tagfs_query_single(&name_tag, result_inodes, &count, 256);
 
     if (count == 0) {
-        kprintf("No tasks running.\n");
-    } else {
-        const char* state_names[] = {
-            "Idle", "Running", "Waiting", "Sleeping",
-            "Blocked", "Paused", "Zombie", "Dead"
-        };
-
-        for (int i = 0; i < count; i++) {
-            Task* t = tasks[i];
-            const char* state_str = (t->state < 8) ? state_names[t->state] : "Unknown";
-
-            kprintf("%lu     %s                 %s        %u   %u   %lu\n",
-                    t->task_id,
-                    t->name,
-                    state_str,
-                    t->energy_allocated,
-                    t->health,
-                    t->events_processed);
-        }
+        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
+        return -1;
     }
 
-    kprintf("\nTotal tasks: %d\n", count);
+    if (tagfs_restore_file(result_inodes[0]) != 0) {
+        kprintf("%[E]Failed to restore file%[D]\n");
+        return -1;
+    }
+
+    kprintf("%[S]Restored '%s' from trash%[D]\n", argv[1]);
+    return 0;
+}
+
+// ============================================================================
+// COMMAND: tag
+// ============================================================================
+
+int cmd_tag(int argc, char** argv) {
+    if (argc < 3) {
+        kprintf("Usage: tag <filename> <key:value>\n");
+        return -1;
+    }
+
+    uint64_t inode_id = tagfs_find_by_name(argv[1]);
+    if (inode_id == TAGFS_INVALID_INODE) {
+        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
+        return -1;
+    }
+
+    // Parse tag
+    Tag tag = tagfs_tag_from_string(argv[2]);
+    if (tagfs_add_tag(inode_id, &tag) == 0) {
+        kprintf("%[E]Failed to add tag%[D]\n");
+        return -1;
+    }
+
+    kprintf("%[S]Added tag '%s' to '%s'%[D]\n", argv[2], argv[1]);
+    return 0;
+}
+
+// ============================================================================
+// COMMAND: untag
+// ============================================================================
+
+int cmd_untag(int argc, char** argv) {
+    if (argc < 3) {
+        kprintf("Usage: untag <filename> <key>\n");
+        return -1;
+    }
+
+    uint64_t inode_id = tagfs_find_by_name(argv[1]);
+    if (inode_id == TAGFS_INVALID_INODE) {
+        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
+        return -1;
+    }
+
+    if (tagfs_remove_tag(inode_id, argv[2]) == 0) {
+        kprintf("%[E]Failed to remove tag%[D]\n");
+        return -1;
+    }
+
+    kprintf("%[S]Removed tag '%s' from '%s'%[D]\n", argv[2], argv[1]);
+    return 0;
+}
+
+// ============================================================================
+// COMMAND: use
+// ============================================================================
+
+int cmd_use(int argc, char** argv) {
+    if (argc < 2) {
+        kprintf("Usage: use <tag:value> [tag:value ...]\n");
+        kprintf("       use clear  (to clear context)\n");
+        return -1;
+    }
+
+    if (strcmp(argv[1], "clear") == 0) {
+        tagfs_context_clear();
+        kprintf("%[S]Context cleared%[D]\n");
+        return 0;
+    }
+
+    // Parse tags
+    Tag tags[TAGFS_MAX_CONTEXT_TAGS];
+    uint32_t tag_count = 0;
+
+    for (int i = 1; i < argc && tag_count < TAGFS_MAX_CONTEXT_TAGS; i++) {
+        tags[tag_count] = tagfs_tag_from_string(argv[i]);
+        tag_count++;
+    }
+
+    if (tagfs_context_set(tags, tag_count) != 0) {
+        kprintf("%[E]Failed to set context%[D]\n");
+        return -1;
+    }
+
+    kprintf("%[S]Context set to: %[D]", "");
+    for (uint32_t i = 0; i < tag_count; i++) {
+        kprintf("%s:%s ", tags[i].key, tags[i].value);
+    }
     kprintf("\n");
+
     return 0;
 }
 
@@ -440,279 +553,58 @@ int cmd_info(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
-    kprintf("\n%[H]═══════════════════════════════════════════════════%[D]\n");
-    kprintf("%[H]             BoxOS System Information              %[D]\n");
-    kprintf("%[H]═══════════════════════════════════════════════════%[D]\n\n");
+    kprintf("\n%[H]BoxOS System Information%[D]\n");
+    kprintf("=======================================================\n");
 
     // CPU info
-    char cpu_vendor[13];
-    char cpu_brand[49];
+    char cpu_vendor[13] = {0};
+    char cpu_brand[49] = {0};
     detect_cpu_info(cpu_vendor, cpu_brand);
+    kprintf("CPU: %s\n", cpu_vendor);
+    if (cpu_brand[0]) {
+        kprintf("Brand: %s\n", cpu_brand);
+    }
 
-    kprintf("%[H]CPU:%[D]\n");
-    kprintf("  Vendor: %s\n", cpu_vendor);
-    kprintf("  Brand:  %s\n", cpu_brand);
+    // Filesystem info
+    extern TagFSContext global_tagfs;
+    kprintf("Filesystem: TagFS\n");
+    kprintf("Files: %u / %u\n",
+            global_tagfs.superblock->total_inodes - global_tagfs.superblock->free_inodes,
+            global_tagfs.superblock->total_inodes);
+    kprintf("Blocks: %u / %u\n",
+            global_tagfs.superblock->total_blocks - global_tagfs.superblock->free_blocks,
+            global_tagfs.superblock->total_blocks);
 
-    // Memory info
-    vmm_stats_t stats;
-    vmm_get_global_stats(&stats);
-
-    kprintf("\n%[H]Memory:%[D]\n");
-    kprintf("  Total mapped: %lu MB\n",
-           (stats.total_mapped_pages * 4096) / (1024 * 1024));
-    kprintf("  Kernel pages: %lu\n", stats.kernel_mapped_pages);
-    kprintf("  User pages:   %lu\n", stats.user_mapped_pages);
-
-    kprintf("\n%[H]Filesystem:%[D]\n");
-    kprintf("  Type: TagFS (tag-based filesystem)\n");
-    kprintf("  Blocks: 128 (512 KB total)\n");
+    // User info
+    kprintf("User: %s\n", current_user);
+    kprintf("Shell: BoxOS Shell v2.0\n");
 
     kprintf("\n");
     return 0;
 }
 
 // ============================================================================
-// COMMAND: create - Create file with content
+// COMMAND: edit
 // ============================================================================
 
-int cmd_create(int argc, char** argv) {
-    if (argc < 3) {
-        kprintf("%[E]Usage: create <filename> <tag1:val1> [tag2:val2] ... [--data \"content\"]%[D]\n");
-        kprintf("Example: create myfile.txt name:myfile type:text --data \"Hello World\"\n");
-        return 1;
-    }
-
-    // Парсим теги и данные
-    Tag tags[TAGFS_MAX_TAGS_PER_FILE];
-    uint32_t tag_count = 0;
-    const char* data = NULL;
-
-    // Первый аргумент - имя файла (становится тегом name:xxx)
-    char name_tag_str[128];
-    ksnprintf(name_tag_str, sizeof(name_tag_str), "name:%s", argv[1]);
-    tags[tag_count++] = tagfs_tag_from_string(name_tag_str);
-
-    // Парсим остальные теги
-    int i = 2;
-    while (i < argc) {
-        if (strcmp(argv[i], "--data") == 0 && i + 1 < argc) {
-            data = argv[i + 1];
-            i += 2;
-        } else {
-            if (tag_count >= TAGFS_MAX_TAGS_PER_FILE) {
-                kprintf("%[E]Too many tags (max %d)%[D]\n", TAGFS_MAX_TAGS_PER_FILE);
-                return 1;
-            }
-            tags[tag_count++] = tagfs_tag_from_string(argv[i]);
-            i++;
-        }
-    }
-
-    // Создаем файл
-    uint64_t inode_id;
-    if (data) {
-        inode_id = tagfs_create_file_with_data(tags, tag_count, (const uint8_t*)data, strlen(data));
-    } else {
-        inode_id = tagfs_create_file(tags, tag_count);
-    }
-
-    if (inode_id == TAGFS_INVALID_INODE) {
-        kprintf("%[E]Failed to create file%[D]\n");
-        return 1;
-    }
-
-    kprintf("%[S]File created: inode=%lu%[D]\n", inode_id);
-    return 0;
-}
-
-// ============================================================================
-// COMMAND: eye - View file contents (like cat but cooler name)
-// ============================================================================
-
-int cmd_eye(int argc, char** argv) {
+int cmd_edit(int argc, char** argv) {
     if (argc < 2) {
-        kprintf("%[E]Usage: eye <filename>%[D]\n");
-        return 1;
+        kprintf("Usage: edit <filename>\n");
+        return -1;
     }
 
-    // Ищем файл по имени
-    uint64_t inode_id = tagfs_find_by_name(argv[1]);
-    if (inode_id == TAGFS_INVALID_INODE) {
-        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
-        return 1;
-    }
+    kprintf("%[H]BoxEditor - Text Editor%[D]\n");
+    kprintf("=======================================================\n");
+    kprintf("%[W]Editor not yet implemented!%[D]\n");
+    kprintf("Coming soon: Full-featured text editor for BoxOS\n");
+    kprintf("\nFeatures planned:\n");
+    kprintf("  - Line editing with insert/overwrite modes\n");
+    kprintf("  - Copy/paste support\n");
+    kprintf("  - Syntax highlighting\n");
+    kprintf("  - Multi-file editing\n");
+    kprintf("\nFile: %s\n", argv[1]);
+    kprintf("\n");
 
-    // Читаем содержимое
-    uint64_t size;
-    uint8_t* content = tagfs_read_file_content(inode_id, &size);
-    if (!content) {
-        kprintf("%[E]Failed to read file%[D]\n");
-        return 1;
-    }
-
-    // Выводим содержимое
-    kprintf("\n%[H]──────────────────────────────────────────────%[D]\n");
-    kprintf("%[H]File: %s (inode=%lu, size=%lu bytes)%[D]\n", argv[1], inode_id, size);
-    kprintf("%[H]──────────────────────────────────────────────%[D]\n\n");
-
-    if (size > 0) {
-        kprintf("%s\n", (char*)content);
-    } else {
-        kprintf("%[W](empty file)%[D]\n");
-    }
-
-    kprintf("\n%[H]──────────────────────────────────────────────%[D]\n\n");
-
-    kfree(content);
-    return 0;
-}
-
-// ============================================================================
-// COMMAND: use - Set tag context filter
-// ============================================================================
-
-int cmd_use(int argc, char** argv) {
-    if (argc < 2) {
-        kprintf("%[E]Usage: use <tag1:val1> [tag2:val2] ...%[D]\n");
-        kprintf("       use clear  (to clear context)%[D]\n");
-        kprintf("\nExample: use type:image size:small\n");
-        kprintf("After this, you'll only see files with BOTH tags!\n");
-        return 1;
-    }
-
-    // Проверяем команду clear
-    if (strcmp(argv[1], "clear") == 0) {
-        tagfs_context_clear();
-        return 0;
-    }
-
-    // Парсим теги
-    Tag tags[TAGFS_MAX_CONTEXT_TAGS];
-    uint32_t tag_count = 0;
-
-    for (int i = 1; i < argc && tag_count < TAGFS_MAX_CONTEXT_TAGS; i++) {
-        tags[tag_count++] = tagfs_tag_from_string(argv[i]);
-    }
-
-    // Устанавливаем контекст
-    int result = tagfs_context_set(tags, tag_count);
-    if (result != 0) {
-        kprintf("%[E]Failed to set context%[D]\n");
-        return 1;
-    }
-
-    // Показываем сколько файлов теперь видно
-    uint64_t result_inodes[256];
-    uint32_t count;
-    tagfs_context_list_files(result_inodes, &count, 256);
-    kprintf("%[S]Context active: %u files match%[D]\n", count);
-
-    return 0;
-}
-
-// ============================================================================
-// COMMAND: trash - Move file to trash
-// ============================================================================
-
-int cmd_trash(int argc, char** argv) {
-    if (argc < 2) {
-        kprintf("%[E]Usage: trash <filename>%[D]\n");
-        return 1;
-    }
-
-    // Ищем файл по имени
-    uint64_t inode_id = tagfs_find_by_name(argv[1]);
-    if (inode_id == TAGFS_INVALID_INODE) {
-        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
-        return 1;
-    }
-
-    // Перемещаем в корзину
-    int result = tagfs_trash_file(inode_id);
-    if (result != 0) {
-        kprintf("%[E]Failed to trash file%[D]\n");
-        return 1;
-    }
-
-    kprintf("%[S]File moved to trash: %s%[D]\n", argv[1]);
-    kprintf("(Use 'restore %s' to restore it)\n", argv[1]);
-    return 0;
-}
-
-// ============================================================================
-// COMMAND: erase - Permanently delete file
-// ============================================================================
-
-int cmd_erase(int argc, char** argv) {
-    if (argc < 2) {
-        kprintf("%[E]Usage: erase <filename>%[D]\n");
-        kprintf("%[W]WARNING: This permanently deletes the file!%[D]\n");
-        return 1;
-    }
-
-    // Ищем файл по имени (включая в корзине)
-    char tag_str[128];
-    ksnprintf(tag_str, sizeof(tag_str), "name:%s", argv[1]);
-    Tag name_tag = tagfs_tag_from_string(tag_str);
-
-    uint64_t result_inodes[256];
-    uint32_t count;
-    tagfs_query_single(&name_tag, result_inodes, &count, 256);
-
-    if (count == 0) {
-        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
-        return 1;
-    }
-
-    // Берем первый найденный файл
-    uint64_t inode_id = result_inodes[0];
-
-    // Удаляем полностью
-    int result = tagfs_erase_file(inode_id);
-    if (result != 0) {
-        kprintf("%[E]Failed to erase file%[D]\n");
-        return 1;
-    }
-
-    kprintf("%[S]File permanently erased: %s%[D]\n", argv[1]);
-    return 0;
-}
-
-// ============================================================================
-// COMMAND: restore - Restore file from trash
-// ============================================================================
-
-int cmd_restore(int argc, char** argv) {
-    if (argc < 2) {
-        kprintf("%[E]Usage: restore <filename>%[D]\n");
-        return 1;
-    }
-
-    // Ищем файл по имени (включая в корзине)
-    char tag_str[128];
-    ksnprintf(tag_str, sizeof(tag_str), "name:%s", argv[1]);
-    Tag name_tag = tagfs_tag_from_string(tag_str);
-
-    uint64_t result_inodes[256];
-    uint32_t count;
-    tagfs_query_single(&name_tag, result_inodes, &count, 256);
-
-    if (count == 0) {
-        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
-        return 1;
-    }
-
-    // Берем первый найденный файл
-    uint64_t inode_id = result_inodes[0];
-
-    // Восстанавливаем
-    int result = tagfs_restore_file(inode_id);
-    if (result != 0) {
-        kprintf("%[E]Failed to restore file%[D]\n");
-        return 1;
-    }
-
-    kprintf("%[S]File restored from trash: %s%[D]\n", argv[1]);
     return 0;
 }
 
@@ -724,15 +616,44 @@ int cmd_reboot(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
-    kprintf("\n%[H]Rebooting system...%[D]\n\n");
+    kprintf("\n%[W]Rebooting system...%[D]\n\n");
 
     // Wait a moment
     for (volatile int i = 0; i < 10000000; i++);
 
-    // Triple fault to reboot
+    // Use keyboard controller to reboot
+    outb(0x64, 0xFE);
+
+    // If that fails, try triple fault
     asm volatile("cli");
-    asm volatile("lidt (0)");  // Load invalid IDT
-    asm volatile("int $3");    // Trigger interrupt
+    asm volatile("lidt (0)");
+    asm volatile("int $3");
+
+    return 0;
+}
+
+// ============================================================================
+// COMMAND: byebye (shutdown)
+// ============================================================================
+
+int cmd_byebye(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
+
+    kprintf("\n%[H]Thank you for using BoxOS!%[D]\n");
+    kprintf("%[S]Shutting down...%[D]\n\n");
+
+    // Wait a moment
+    for (volatile int i = 0; i < 10000000; i++);
+
+    // Try QEMU/Bochs shutdown
+    outw(0xB004, 0x2000);  // Bochs
+    outw(0x604, 0x2000);   // QEMU newer
+    outw(0x4004, 0x3400);  // QEMU older
+
+    // If still running, halt
+    kprintf("Shutdown failed - system halted\n");
+    while (1) asm("hlt");
 
     return 0;
 }
