@@ -1210,8 +1210,8 @@ int vmm_handle_page_fault(uintptr_t fault_addr, uint64_t error_code) {
         return 0;  // Handled successfully
     }
 
-    // Check if this is in low memory (0-64MB) for kernel data/heap fallback
-    if (page_addr < (64 * 1024 * 1024)) {
+    // Check if this is in low memory (0-256MB) for kernel data/heap fallback
+    if (page_addr < (256ULL * 1024 * 1024)) {
         kprintf("[VMM] Demand paging: mapping low memory page at 0x%llx\n", page_addr);
 
         // Allocate physical page
