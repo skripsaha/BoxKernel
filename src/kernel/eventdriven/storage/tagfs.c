@@ -719,8 +719,9 @@ void tagfs_init(void) {
 void tagfs_format(uint64_t total_blocks) {
     kprintf("[TAGFS] Formatting filesystem with %lu blocks...\n", total_blocks);
 
-    // Clear storage
-    memset(tagfs_storage, 0, sizeof(tagfs_storage));
+    // Clear storage (tagfs_storage is now a pointer, not an array!)
+    size_t storage_size = TAGFS_MEM_BLOCKS * TAGFS_BLOCK_SIZE;
+    memset(tagfs_storage, 0, storage_size);
 
     // Initialize superblock
     TagFSSuperblock* sb = (TagFSSuperblock*)tagfs_storage[0];
