@@ -1,6 +1,6 @@
 #include "deck_interface.h"
 #include "klib.h"
-#include "../task/task.h"  // ✅ NEW: Task system integration
+#include "../task/task.h"  // NEW: Task system integration
 
 // ============================================================================
 // HARDWARE DECK - Timer & Device Operations
@@ -9,7 +9,7 @@
 // Timer descriptor
 typedef struct {
     uint64_t id;
-    uint64_t owner_task_id;      // ✅ Changed from owner_pid to owner_task_id
+    uint64_t owner_task_id;      // Changed from owner_pid to owner_task_id
     uint64_t expiration;         // TSC timestamp
     uint64_t interval;           // 0 = one-shot, >0 = periodic
     uint64_t event_id;           // Для отправки уведомления
@@ -21,7 +21,7 @@ static Timer timers[MAX_TIMERS];
 static volatile uint64_t next_timer_id = 1;
 
 // ============================================================================
-// TIMER OPERATIONS (✅ Integrated with Task system)
+// TIMER OPERATIONS (Integrated with Task system)
 // ============================================================================
 
 static Timer* timer_create(uint64_t delay_ms, uint64_t interval_ms) {
@@ -30,21 +30,21 @@ static Timer* timer_create(uint64_t delay_ms, uint64_t interval_ms) {
         if (!timers[i].active) {
             timers[i].id = atomic_increment_u64(&next_timer_id);
 
-            // ✅ Get current task ID
+            // Get current task ID
             timers[i].owner_task_id = task_get_current_id();
 
             timers[i].expiration = rdtsc() + (delay_ms * 2400000);  // Примерная конверсия ms->TSC
             timers[i].interval = interval_ms * 2400000;
             timers[i].active = 1;
 
-            kprintf("[HARDWARE] ✅ Created timer %lu for task %lu: delay=%lu ms, interval=%lu ms\n",
+            kprintf("[HARDWARE] Created timer %lu for task %lu: delay=%lu ms, interval=%lu ms\n",
                     timers[i].id, timers[i].owner_task_id, delay_ms, interval_ms);
 
             return &timers[i];
         }
     }
 
-    kprintf("[HARDWARE] ❌ No free timer slots!\n");
+    kprintf("[HARDWARE] ERROR: No free timer slots!\n");
     return 0;
 }
 
@@ -52,7 +52,7 @@ static int timer_cancel(uint64_t timer_id) {
     for (int i = 0; i < MAX_TIMERS; i++) {
         if (timers[i].active && timers[i].id == timer_id) {
             timers[i].active = 0;
-            kprintf("[HARDWARE] ✅ Cancelled timer %lu\n", timer_id);
+            kprintf("[HARDWARE] Cancelled timer %lu\n", timer_id);
             return 1;
         }
     }
@@ -60,14 +60,14 @@ static int timer_cancel(uint64_t timer_id) {
 }
 
 static void timer_sleep(uint64_t ms) {
-    // ✅ Real implementation using Task system!
+    // Real implementation using Task system!
     uint64_t task_id = task_get_current_id();
 
     if (task_id > 0) {
         task_sleep(task_id, ms);
-        kprintf("[HARDWARE] ✅ Task %lu sleeping for %lu ms\n", task_id, ms);
+        kprintf("[HARDWARE] Task %lu sleeping for %lu ms\n", task_id, ms);
     } else {
-        kprintf("[HARDWARE] ⚠️  No current task to sleep\n");
+        kprintf("[HARDWARE] WARNING: No current task to sleep\n");
     }
 }
 
@@ -82,12 +82,12 @@ static void timer_check_expired(void) {
 
     for (int i = 0; i < MAX_TIMERS; i++) {
         if (timers[i].active && now >= timers[i].expiration) {
-            kprintf("[HARDWARE] ⏰ Timer %lu expired!\n", timers[i].id);
+            kprintf("[HARDWARE] Timer %lu expired!\n", timers[i].id);
 
-            // ✅ Wake up the owner task!
+            // Wake up the owner task!
             if (timers[i].owner_task_id > 0) {
                 task_wake(timers[i].owner_task_id);
-                kprintf("[HARDWARE] ✅ Woke up task %lu\n", timers[i].owner_task_id);
+                kprintf("[HARDWARE] Woke up task %lu\n", timers[i].owner_task_id);
             }
 
             // Если periodic - перезапускаем

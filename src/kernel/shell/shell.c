@@ -154,7 +154,7 @@ int cmd_help(int argc, char** argv) {
     kprintf("═══════════════════════════════════════════════════\n");
 
     for (int i = 0; commands[i].name != NULL; i++) {
-        kprintf("  %[H]%-12s%[D] - %s\n", commands[i].name, commands[i].description);
+        kprintf("  %[H]%s%[D] - %s\n", commands[i].name, commands[i].description);
     }
 
     kprintf("\n");
@@ -398,8 +398,7 @@ int cmd_ps(int argc, char** argv) {
 
     kprintf("\n%[H]Running Tasks:%[D]\n");
     kprintf("═══════════════════════════════════════════════════════════════════\n");
-    kprintf("%-6s %-20s %-12s %-8s %-8s %-8s\n",
-            "ID", "Name", "State", "Energy", "Health", "Events");
+    kprintf("ID     Name                 State        Energy   Health   Events\n");
     kprintf("───────────────────────────────────────────────────────────────────\n");
 
     // Get all tasks
@@ -418,7 +417,7 @@ int cmd_ps(int argc, char** argv) {
             Task* t = tasks[i];
             const char* state_str = (t->state < 8) ? state_names[t->state] : "Unknown";
 
-            kprintf("%-6lu %-20s %-12s %-8u %-8u %-8lu\n",
+            kprintf("%lu     %s                 %s        %u   %u   %lu\n",
                     t->task_id,
                     t->name,
                     state_str,

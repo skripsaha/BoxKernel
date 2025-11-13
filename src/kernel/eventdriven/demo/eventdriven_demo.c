@@ -204,7 +204,7 @@ void eventdriven_demo_run(void) {
     kprintf("\n[DEMO] Creating simple task with medium energy (50)...\n");
     Task* task1 = task_spawn("SimpleTask", test_task_simple, 50);
     if (task1) {
-        kprintf("[DEMO] ✅ Task spawned! ID=%lu\n", task1->task_id);
+        kprintf("[DEMO] Task spawned! ID=%lu\n", task1->task_id);
         task_print_stats(task1->task_id);
 
         // Give it time to run
@@ -220,14 +220,14 @@ void eventdriven_demo_run(void) {
     kprintf("\n[DEMO] Creating high-energy task (energy=90)...\n");
     Task* task2 = task_spawn("HighEnergyTask", test_task_high_energy, 90);
     if (task2) {
-        kprintf("[DEMO] ✅ High-energy task spawned! ID=%lu\n", task2->task_id);
+        kprintf("[DEMO] High-energy task spawned! ID=%lu\n", task2->task_id);
     }
 
     // Test 3: Low energy task
     kprintf("\n[DEMO] Creating low-energy task (energy=20)...\n");
     Task* task3 = task_spawn("LowEnergyTask", test_task_low_energy, 20);
     if (task3) {
-        kprintf("[DEMO] ✅ Low-energy task spawned! ID=%lu\n", task3->task_id);
+        kprintf("[DEMO] Low-energy task spawned! ID=%lu\n", task3->task_id);
     }
 
     // Let them run
@@ -240,7 +240,7 @@ void eventdriven_demo_run(void) {
     kprintf("\n[DEMO] Creating sleepy task (will sleep 1000ms)...\n");
     Task* task4 = task_spawn_with_args("SleepyTask", test_task_sleepy, (void*)1000, 60);
     if (task4) {
-        kprintf("[DEMO] ✅ Sleepy task spawned! ID=%lu\n", task4->task_id);
+        kprintf("[DEMO] Sleepy task spawned! ID=%lu\n", task4->task_id);
         kprintf("[DEMO] Task is now sleeping... (state=%d)\n", task4->state);
 
         // Wait a bit
@@ -256,7 +256,7 @@ void eventdriven_demo_run(void) {
     kprintf("\n[DEMO] Testing pause/resume...\n");
     Task* task5 = task_spawn("PausableTask", test_task_simple, 50);
     if (task5) {
-        kprintf("[DEMO] ✅ Task created (ID=%lu)\n", task5->task_id);
+        kprintf("[DEMO] Task created (ID=%lu)\n", task5->task_id);
 
         // Pause it
         kprintf("[DEMO] Pausing task...\n");
@@ -277,7 +277,7 @@ void eventdriven_demo_run(void) {
     kprintf("\n[DEMO] Creating task group 'WorkerGroup'...\n");
     uint64_t group_id = task_group_create("WorkerGroup");
     if (group_id > 0) {
-        kprintf("[DEMO] ✅ Group created! ID=%lu\n", group_id);
+        kprintf("[DEMO] Group created! ID=%lu\n", group_id);
 
         // Create 3 tasks and add to group
         kprintf("[DEMO] Adding 3 tasks to group...\n");
@@ -286,7 +286,7 @@ void eventdriven_demo_run(void) {
             Task* worker = task_spawn("Worker", test_task_simple, 50);
             if (worker) {
                 task_group_add(group_id, worker->task_id);
-                kprintf("[DEMO] ✅ Added task %lu to group\n", worker->task_id);
+                kprintf("[DEMO] Added task %lu to group\n", worker->task_id);
             }
         }
 
@@ -321,10 +321,10 @@ void eventdriven_demo_run(void) {
     kprintf("4. Results retrieved via polling (non-blocking)\n");
     kprintf("5. NO SYSCALLS - only lock-free ring buffers!\n");
     kprintf("\n");
-    kprintf("6. ✅ TASK SYSTEM: Lightweight tasks with energy management\n");
-    kprintf("7. ✅ Tasks spawn in microseconds (vs milliseconds for processes)\n");
-    kprintf("8. ✅ Energy-based scheduling adapts to task efficiency\n");
-    kprintf("9. ✅ Health monitoring tracks responsiveness & stability\n");
-    kprintf("10. ✅ Task groups enable resource limits & broadcasts\n");
+    kprintf("6. TASK SYSTEM: Lightweight tasks with energy management\n");
+    kprintf("7. Tasks spawn in microseconds (vs milliseconds for processes)\n");
+    kprintf("8. Energy-based scheduling adapts to task efficiency\n");
+    kprintf("9. Health monitoring tracks responsiveness & stability\n");
+    kprintf("10. Task groups enable resource limits & broadcasts\n");
     kprintf("\n");
 }

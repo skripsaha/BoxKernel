@@ -191,14 +191,14 @@ static inline int center_process_event(Event* event, RoutingTable* routing_table
         atomic_increment_u64((volatile uint64_t*)&center_stats.security_denied);
         kprintf("[CENTER] Event %lu DENIED by security\n", event->id);
 
-        // ✅ FIXED: Отправляем error response обратно в user space
+        // FIXED: Отправляем error response обратно в user space
         Response error_response;
         response_init(&error_response, event->id, EVENT_STATUS_DENIED);
         error_response.timestamp = rdtsc();
         error_response.error_code = 1;  // Security violation
 
         // Отправляем в response ring
-        // ✅ FIXED: Добавлен timeout
+        // FIXED: Добавлен timeout
         uint64_t timeout = 1000000;
         while (!response_ring_push(kernel_to_user_ring, &error_response)) {
             cpu_pause();

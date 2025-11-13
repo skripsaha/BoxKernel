@@ -14,7 +14,7 @@ typedef struct {
     uint64_t size;
 } MemoryAllocResult;
 
-// ✅ REAL FILE DESCRIPTOR TABLE
+// REAL FILE DESCRIPTOR TABLE
 typedef struct {
     int fd;                    // File descriptor number
     uint64_t inode_id;         // TagFS inode ID
@@ -137,7 +137,7 @@ static void free_fd(int fd) {
 }
 
 // ============================================================================
-// REAL FILESYSTEM OPERATIONS - Using TagFS! ✅
+// REAL FILESYSTEM OPERATIONS - Using TagFS!
 // ============================================================================
 
 // Open file: search by name tag, return FD
@@ -158,11 +158,11 @@ static int fs_open(const char* path) {
         int fd = allocate_fd(inode_id, path, 0);  // flags=0 for now
 
         if (fd >= 0) {
-            kprintf("[STORAGE] ✅ Opened file '%s' (inode=%lu, fd=%d)\n",
+            kprintf("[STORAGE] Opened file '%s' (inode=%lu, fd=%d)\n",
                     path, inode_id, fd);
             return fd;
         } else {
-            kprintf("[STORAGE] ❌ Failed to allocate FD for '%s'\n", path);
+            kprintf("[STORAGE] ERROR: Failed to allocate FD for '%s'\n", path);
             return -1;
         }
     } else {
@@ -177,11 +177,11 @@ static int fs_open(const char* path) {
 
         if (inode_id != TAGFS_INVALID_INODE) {
             int fd = allocate_fd(inode_id, path, 0);
-            kprintf("[STORAGE] ✅ Created & opened file '%s' (inode=%lu, fd=%d)\n",
+            kprintf("[STORAGE] Created & opened file '%s' (inode=%lu, fd=%d)\n",
                     path, inode_id, fd);
             return fd;
         } else {
-            kprintf("[STORAGE] ❌ Failed to create file '%s'\n", path);
+            kprintf("[STORAGE] ERROR: Failed to create file '%s'\n", path);
             return -1;
         }
     }
@@ -192,12 +192,12 @@ static int fs_close(int fd) {
     FileDescriptor* fd_info = find_fd(fd);
 
     if (fd_info) {
-        kprintf("[STORAGE] ✅ Closed fd=%d (inode=%lu, '%s')\n",
+        kprintf("[STORAGE] Closed fd=%d (inode=%lu, '%s')\n",
                 fd, fd_info->inode_id, fd_info->path);
         free_fd(fd);
         return 0;
     } else {
-        kprintf("[STORAGE] ❌ Invalid fd=%d\n", fd);
+        kprintf("[STORAGE] ERROR: Invalid fd=%d\n", fd);
         return -1;
     }
 }
@@ -207,7 +207,7 @@ static int fs_read(int fd, void* buffer, uint64_t size) {
     FileDescriptor* fd_info = find_fd(fd);
 
     if (!fd_info) {
-        kprintf("[STORAGE] ❌ Read: invalid fd=%d\n", fd);
+        kprintf("[STORAGE] ERROR: Read: invalid fd=%d\n", fd);
         return -1;
     }
 
@@ -217,11 +217,11 @@ static int fs_read(int fd, void* buffer, uint64_t size) {
 
     if (bytes_read >= 0) {
         fd_info->position += bytes_read;
-        kprintf("[STORAGE] ✅ Read %d bytes from fd=%d (inode=%lu, pos=%lu)\n",
+        kprintf("[STORAGE] Read %d bytes from fd=%d (inode=%lu, pos=%lu)\n",
                 bytes_read, fd, fd_info->inode_id, fd_info->position);
         return bytes_read;
     } else {
-        kprintf("[STORAGE] ❌ Read failed from fd=%d\n", fd);
+        kprintf("[STORAGE] ERROR: Read failed from fd=%d\n", fd);
         return -1;
     }
 }
@@ -231,7 +231,7 @@ static int fs_write(int fd, const void* buffer, uint64_t size) {
     FileDescriptor* fd_info = find_fd(fd);
 
     if (!fd_info) {
-        kprintf("[STORAGE] ❌ Write: invalid fd=%d\n", fd);
+        kprintf("[STORAGE] ERROR: Write: invalid fd=%d\n", fd);
         return -1;
     }
 
@@ -248,11 +248,11 @@ static int fs_write(int fd, const void* buffer, uint64_t size) {
             fd_info->size = inode->size;
         }
 
-        kprintf("[STORAGE] ✅ Wrote %d bytes to fd=%d (inode=%lu, pos=%lu, size=%lu)\n",
+        kprintf("[STORAGE] Wrote %d bytes to fd=%d (inode=%lu, pos=%lu, size=%lu)\n",
                 bytes_written, fd, fd_info->inode_id, fd_info->position, fd_info->size);
         return bytes_written;
     } else {
-        kprintf("[STORAGE] ❌ Write failed to fd=%d\n", fd);
+        kprintf("[STORAGE] ERROR: Write failed to fd=%d\n", fd);
         return -1;
     }
 }
@@ -287,15 +287,15 @@ static int fs_stat(const char* path, FileStat* stat_buf) {
             stat_buf->tag_count = inode->tag_count;
             stat_buf->flags = inode->flags;
 
-            kprintf("[STORAGE] ✅ Stat '%s': inode=%lu, size=%lu bytes, tags=%u\n",
+            kprintf("[STORAGE] Stat '%s': inode=%lu, size=%lu bytes, tags=%u\n",
                     path, inode_id, inode->size, inode->tag_count);
             return 0;  // Success
         } else {
-            kprintf("[STORAGE] ❌ Stat '%s': inode not found in memory\n", path);
+            kprintf("[STORAGE] ERROR: Stat '%s': inode not found in memory\n", path);
             return -1;
         }
     } else {
-        kprintf("[STORAGE] ❌ Stat '%s': file not found\n", path);
+        kprintf("[STORAGE] ERROR: Stat '%s': file not found\n", path);
         return -1;  // File not found
     }
 }
@@ -340,7 +340,7 @@ int storage_deck_process(RoutingEntry* entry) {
             uint32_t flags = *(uint32_t*)(event->data + 8);
             int fd = *(int*)(event->data + 12);
 
-            // ✅ Real memory mapping implementation
+            // Real memory mapping implementation
             // For now, implement anonymous mapping (fd == -1)
             // File-backed mapping can be added later
 
@@ -354,18 +354,18 @@ int storage_deck_process(RoutingEntry* entry) {
                         memset(mapped_addr, 0, size);
                     }
 
-                    kprintf("[STORAGE] ✅ Memory mapped %lu bytes at %p (anonymous)\n",
+                    kprintf("[STORAGE] Memory mapped %lu bytes at %p (anonymous)\n",
                             size, mapped_addr);
                     deck_complete(entry, DECK_PREFIX_STORAGE, mapped_addr);
                     return 1;
                 } else {
-                    kprintf("[STORAGE] ❌ Memory mapping failed for %lu bytes\n", size);
+                    kprintf("[STORAGE] ERROR: Memory mapping failed for %lu bytes\n", size);
                     deck_error(entry, DECK_PREFIX_STORAGE, 9);
                     return 0;
                 }
             } else {
                 // File-backed mapping - TODO: implement later
-                kprintf("[STORAGE] ❌ File-backed memory mapping not yet supported (fd=%d)\n", fd);
+                kprintf("[STORAGE] ERROR: File-backed memory mapping not yet supported (fd=%d)\n", fd);
                 deck_error(entry, DECK_PREFIX_STORAGE, 10);
                 return 0;
             }
@@ -377,7 +377,7 @@ int storage_deck_process(RoutingEntry* entry) {
             int fd = fs_open(path);
 
             if (fd >= 0) {
-                // ✅ Return FD as result
+                // Return FD as result
                 int* fd_result = (int*)kmalloc(sizeof(int));
                 *fd_result = fd;
                 deck_complete(entry, DECK_PREFIX_STORAGE, fd_result);
@@ -406,7 +406,7 @@ int storage_deck_process(RoutingEntry* entry) {
             int fd = *(int*)event->data;
             uint64_t size = *(uint64_t*)(event->data + 4);
 
-            // ✅ Allocate buffer and read
+            // Allocate buffer and read
             uint8_t* buffer = (uint8_t*)kmalloc(size);
             if (!buffer) {
                 deck_error(entry, DECK_PREFIX_STORAGE, 4);
@@ -430,7 +430,7 @@ int storage_deck_process(RoutingEntry* entry) {
             uint64_t size = *(uint64_t*)(event->data + 4);
             void* data = event->data + 12;
 
-            // ✅ Real write
+            // Real write
             int bytes_written = fs_write(fd, data, size);
             if (bytes_written >= 0) {
                 int* result = (int*)kmalloc(sizeof(int));
@@ -449,12 +449,12 @@ int storage_deck_process(RoutingEntry* entry) {
             // Allocate stat buffer to return to caller
             FileStat* stat_buf = (FileStat*)kmalloc(sizeof(FileStat));
             if (!stat_buf) {
-                kprintf("[STORAGE] ❌ Failed to allocate stat buffer\n");
+                kprintf("[STORAGE] ERROR: Failed to allocate stat buffer\n");
                 deck_error(entry, DECK_PREFIX_STORAGE, 7);
                 return 0;
             }
 
-            // ✅ Real stat implementation
+            // Real stat implementation
             int ret = fs_stat(path, stat_buf);
             if (ret == 0) {
                 // Success - return stat buffer
@@ -594,7 +594,7 @@ DeckContext storage_deck_context;
 void storage_deck_init(void) {
     deck_init(&storage_deck_context, "Storage", DECK_PREFIX_STORAGE, storage_deck_process);
 
-    // ✅ Initialize FD table
+    // Initialize FD table
     memset(fd_table, 0, sizeof(fd_table));
     spinlock_init(&fd_table_lock);
     kprintf("[STORAGE] FD table initialized (%d slots)\n", MAX_OPEN_FILES);

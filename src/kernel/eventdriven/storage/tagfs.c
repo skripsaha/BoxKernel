@@ -1625,8 +1625,8 @@ int tagfs_write_file_content(uint64_t inode_id, const uint8_t* data, uint64_t si
 
     // Записываем данные с начала файла
     int result = tagfs_write_file(inode_id, 0, data, size);
-    if (result != 0) {
-        kprintf("[TAGFS] ERROR: Failed to write file\n");
+    if (result < 0 || (uint64_t)result != size) {
+        kprintf("[TAGFS] ERROR: Failed to write file (wrote %d of %lu bytes)\n", result, size);
         return -1;
     }
 
