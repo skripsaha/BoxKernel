@@ -548,22 +548,37 @@ void tagfs_init(void) {
     if (!tagfs_storage) {
         size_t storage_size = TAGFS_MEM_BLOCKS * TAGFS_BLOCK_SIZE;
         kprintf("[TAGFS] Allocating %lu KB for filesystem storage...\n", storage_size / 1024);
+        kprintf("[TAGFS] DEBUG: About to call vmalloc...\n");
 
         tagfs_storage = (uint8_t (*)[TAGFS_BLOCK_SIZE])vmalloc(storage_size);
+        kprintf("[TAGFS] DEBUG: vmalloc returned %p\n", (void*)tagfs_storage);
+
         if (!tagfs_storage) {
             kprintf("[TAGFS] ERROR: Failed to allocate storage!\n");
             return;
         }
 
+        kprintf("[TAGFS] DEBUG: Storage allocated at %p, about to memset...\n", (void*)tagfs_storage);
+
+        // Zero out the storage - test first byte access
+        kprintf("[TAGFS] DEBUG: Testing first byte write...\n");
+        ((uint8_t*)tagfs_storage)[0] = 0;
+        kprintf("[TAGFS] DEBUG: First byte write OK\n");
+
         // Zero out the storage
+        kprintf("[TAGFS] DEBUG: Zeroing %lu bytes...\n", storage_size);
         memset(tagfs_storage, 0, storage_size);
+        kprintf("[TAGFS] DEBUG: memset complete\n");
         kprintf("[TAGFS] Storage allocated at %p\n", tagfs_storage);
     }
 
     memset(&global_tagfs, 0, sizeof(TagFSContext));
 
     // Allocate superblock in memory
+    kprintf("[TAGFS] DEBUG: About to access tagfs_storage[0] for superblock...\n");
+    kprintf("[TAGFS] DEBUG: tagfs_storage pointer = %p\n", (void*)tagfs_storage);
     global_tagfs.superblock = (TagFSSuperblock*)tagfs_storage[0];
+    kprintf("[TAGFS] DEBUG: superblock assigned to %p\n", (void*)global_tagfs.superblock);
 
     // Проверяем наличие ATA диска
     int disk_available = 0;
@@ -649,7 +664,12 @@ void tagfs_init(void) {
     }
 
     // Setup inode table (starts at block 1)
+    kprintf("[TAGFS] DEBUG: About to assign inode_table...\n");
+    kprintf("[TAGFS] DEBUG: tagfs_storage = %p\n", (void*)tagfs_storage);
+    kprintf("[TAGFS] DEBUG: inode_table_block = %lu\n", global_tagfs.superblock->inode_table_block);
+    kprintf("[TAGFS] DEBUG: About to access tagfs_storage[%lu]...\n", global_tagfs.superblock->inode_table_block);
     global_tagfs.inode_table = (FileInode*)tagfs_storage[global_tagfs.superblock->inode_table_block];
+    kprintf("[TAGFS] DEBUG: inode_table assigned to %p\n", (void*)global_tagfs.inode_table);
 
     // Allocate bitmaps
     uint64_t block_bitmap_size = (global_tagfs.superblock->total_blocks + 7) / 8;

@@ -301,8 +301,14 @@ int cmd_ls(int argc, char** argv) {
     extern TagFSContext global_tagfs;
     uint32_t file_count = 0;
 
+    kprintf("[LS] DEBUG: inode_table = %p\n", (void*)global_tagfs.inode_table);
+    kprintf("[LS] DEBUG: superblock = %p\n", (void*)global_tagfs.superblock);
+    kprintf("[LS] DEBUG: total_inodes = %lu\n", global_tagfs.superblock->total_inodes);
+
     for (uint64_t i = 1; i < global_tagfs.superblock->total_inodes; i++) {
+        kprintf("[LS] DEBUG: About to access inode %lu at %p\n", i, (void*)&global_tagfs.inode_table[i]);
         FileInode* inode = &global_tagfs.inode_table[i];
+        kprintf("[LS] DEBUG: Got inode pointer %p\n", (void*)inode);
 
         // Skip empty inodes
         if (inode->inode_id == 0 || inode->size == 0xFFFFFFFFFFFFFFFF) {
