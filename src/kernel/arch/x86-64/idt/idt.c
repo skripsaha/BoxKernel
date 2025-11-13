@@ -6,6 +6,7 @@
 #include "pit.h"  // PIT timer driver
 #include "task.h" // Task scheduler
 #include "keyboard.h" // Keyboard driver
+#include "vmm.h"  // VMM for page fault handling
 
 static idt_entry_t idt[IDT_ENTRIES];
 static idt_descriptor_t idt_desc;
@@ -155,6 +156,13 @@ void exception_handler(interrupt_frame_t* frame) {
             uint64_t cr2;
             asm volatile("mov %%cr2, %0" : "=r" (cr2));
             kprintf("%[E]Page fault at address: 0x%llx%[D]\n", cr2);
+
+            // Try to handle the page fault
+            if (vmm_handle_page_fault(cr2, frame->error_code) == 0) {
+                kprintf("%[S]Page fault handled successfully - continuing%[D]\n");
+                return;  // Successfully handled, continue execution
+            }
+            // If not handled, fall through to error handling below
             break;
         }
         case EXCEPTION_GENERAL_PROTECTION:
