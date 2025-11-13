@@ -9,9 +9,8 @@
 TagFSContext global_tagfs;
 
 // Простое хранилище блоков в памяти (fallback если диск недоступен)
-#define TAGFS_MEM_BLOCKS 128  // 512MB виртуального диска (128 * 4KB)
-// Use pointer instead of static array to avoid BSS allocation
-static uint8_t (*tagfs_storage)[TAGFS_BLOCK_SIZE] = NULL;
+#define TAGFS_MEM_BLOCKS 128  // 512KB виртуального диска (128 * 4KB)
+static uint8_t (*tagfs_storage)[TAGFS_BLOCK_SIZE] = NULL;  // Pointer to dynamically allocated storage
 
 // Использовать реальный диск или память?
 static int use_disk = 0;  // 0 = память, 1 = диск
@@ -612,23 +611,48 @@ void tagfs_init(void) {
             kprintf("[TAGFS] Syncing new filesystem to disk...\n");
             if (tagfs_sync() != 0) {
                 kprintf("[TAGFS] WARNING: Disk sync failed, using memory-only mode\n");
-                tagfs_set_disk_mode(0);
+                tagfs_set_disk_mode(0);  // Fallback gracefully
             } else {
                 kprintf("[TAGFS] Successfully synced to disk\n");
             }
         }
     }
 
-    // Validate superblock before accessing fields
+    // Validate superblock magic first (critical check)
     if (global_tagfs.superblock->magic != TAGFS_MAGIC) {
         panic("[TAGFS] FATAL: Invalid superblock magic after init!");
     }
 
-    // Validate inode_table_block
+    // Validate superblock values to prevent out-of-bounds access
     if (global_tagfs.superblock->inode_table_block == 0 ||
         global_tagfs.superblock->inode_table_block >= TAGFS_MEM_BLOCKS) {
         panic("[TAGFS] FATAL: Invalid inode_table_block: %lu",
               global_tagfs.superblock->inode_table_block);
+    }
+
+    if (global_tagfs.superblock->data_blocks_start > TAGFS_MEM_BLOCKS) {
+        kprintf("[TAGFS] ERROR: Invalid data_blocks_start (%lu > %u), reformatting...\n",
+                global_tagfs.superblock->data_blocks_start, TAGFS_MEM_BLOCKS);
+        tagfs_format(TAGFS_MEM_BLOCKS);
+    }
+
+    if (global_tagfs.superblock->total_blocks > TAGFS_MEM_BLOCKS) {
+        kprintf("[TAGFS] ERROR: Invalid total_blocks (%lu > %u), reformatting...\n",
+                global_tagfs.superblock->total_blocks, TAGFS_MEM_BLOCKS);
+        tagfs_format(TAGFS_MEM_BLOCKS);
+    }
+
+    // Validate total_inodes doesn't exceed available space
+    uint64_t available_inode_blocks = 0;
+    if (global_tagfs.superblock->tag_index_block > global_tagfs.superblock->inode_table_block) {
+        available_inode_blocks = global_tagfs.superblock->tag_index_block - global_tagfs.superblock->inode_table_block;
+    }
+    uint64_t max_possible_inodes = (available_inode_blocks * TAGFS_BLOCK_SIZE) / TAGFS_INODE_SIZE;
+
+    if (global_tagfs.superblock->total_inodes > max_possible_inodes) {
+        kprintf("[TAGFS] ERROR: Invalid total_inodes (%lu > max %lu), reformatting...\n",
+                global_tagfs.superblock->total_inodes, max_possible_inodes);
+        tagfs_format(TAGFS_MEM_BLOCKS);
     }
 
     // Setup inode table - use explicit pointer arithmetic
@@ -687,12 +711,10 @@ void tagfs_format(uint64_t total_blocks) {
 
     // Clear storage (tagfs_storage is now a pointer, not an array!)
     size_t storage_size = TAGFS_MEM_BLOCKS * TAGFS_BLOCK_SIZE;
-
     memset(tagfs_storage, 0, storage_size);
 
     // Initialize superblock - USE global_tagfs.superblock directly!
     TagFSSuperblock* sb = global_tagfs.superblock;
-
     sb->magic = TAGFS_MAGIC;
     sb->version = TAGFS_VERSION;
     sb->block_size = TAGFS_BLOCK_SIZE;
