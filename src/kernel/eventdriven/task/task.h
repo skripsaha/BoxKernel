@@ -218,4 +218,11 @@ void task_scheduler_tick(void);   // Called by timer interrupt
 // === MIGRATION ===
 int task_migrate(uint64_t task_id, uint8_t target_core);
 
+// === CONTEXT SWITCHING (Assembly functions) ===
+// These are implemented in arch/x86-64/context/context_switch.asm
+void task_save_context(TaskContext* ctx);
+void task_restore_context(TaskContext* ctx);
+void task_switch_to(TaskContext* old_ctx, TaskContext* new_ctx);
+void task_init_context(TaskContext* ctx, void* entry, void* stack, void* arg);
+
 #endif  // TASK_H

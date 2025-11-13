@@ -204,4 +204,8 @@ static inline pte_t vmm_make_pte(uintptr_t phys_addr, uint64_t flags) {
     return (phys_addr & VMM_PTE_ADDR_MASK) | (flags & VMM_PTE_FLAGS_MASK);
 }
 
+// Page fault handling
+// Returns: 0 on success (handled), -1 on error (unhandled)
+int vmm_handle_page_fault(uintptr_t fault_addr, uint64_t error_code);
+
 #endif // VMM_H

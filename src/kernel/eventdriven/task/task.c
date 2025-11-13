@@ -212,16 +212,9 @@ Task* task_spawn_with_args(const char* name, void* entry_point, void* args, uint
     task->page_table = kernel_ctx->pml4_phys;
 
     // === CPU CONTEXT ===
-    // Initialize context for first run
-    memset(&task->context, 0, sizeof(TaskContext));
-    task->context.rip = (uint64_t)entry_point;
-    task->context.rsp = (uint64_t)task->stack_base + TASK_STACK_SIZE - 16;  // Stack grows down
-    task->context.rflags = 0x202;  // IF (interrupts enabled) + bit 1 (always 1)
-
-    // If args provided, pass via RDI (first argument register in x86-64 calling convention)
-    if (args) {
-        task->context.rdi = (uint64_t)args;
-    }
+    // Initialize context for first run using assembly helper
+    void* stack_top = (void*)((uint64_t)task->stack_base + TASK_STACK_SIZE - 16);
+    task_init_context(&task->context, entry_point, stack_top, args);
 
     // === STATISTICS ===
     task->events_processed = 0;
@@ -610,10 +603,32 @@ Task* task_scheduler_next(void) {
 
 void task_scheduler_yield(void) {
     // Current task voluntarily yields CPU
-    if (current_task) {
-        current_task->state = TASK_STATE_WAITING_EVENT;
+    if (!current_task) {
+        return;  // No current task to yield from
     }
-    // Next call to task_scheduler_next() will pick next task
+
+    // Save current task state
+    current_task->state = TASK_STATE_WAITING_EVENT;
+
+    // Get next task to run
+    Task* next_task = task_scheduler_next();
+    if (!next_task || next_task == current_task) {
+        return;  // No other task available
+    }
+
+    // Perform context switch
+    Task* old_task = current_task;
+    current_task = next_task;
+    next_task->state = TASK_STATE_RUNNING;
+    next_task->last_run_time = rdtsc();
+
+    kprintf("[SCHEDULER] Switching from task %lu to %lu\n",
+            old_task->task_id, next_task->task_id);
+
+    // Switch contexts (this will save old and restore new)
+    task_switch_to(&old_task->context, &next_task->context);
+
+    // When we return here, we've been switched back
 }
 
 void task_scheduler_tick(void) {
@@ -630,26 +645,15 @@ void task_scheduler_tick(void) {
 
     spin_unlock(&task_table_lock);
 
-    // SIMPLE EXECUTOR: Run next ready task (cooperative multitasking)
-    // Note: This is a simplified approach without full context switching
-    // Each task runs to completion or yields voluntarily
-    static uint32_t scheduler_tick_count = 0;
-    scheduler_tick_count++;
+    // NOTE: For v1, we use COOPERATIVE multitasking
+    // Tasks explicitly call task_scheduler_yield() to switch contexts
+    // This provides real context switching without IRQ complexity
 
-    // Run scheduler every 10 ticks (~100ms at 100Hz)
-    if (scheduler_tick_count % 10 == 0) {
-        Task* task = task_scheduler_next();
-        if (task && task->state == TASK_STATE_RUNNING && task->entry_point) {
-            // Run task function (simplified execution without context switch)
-            // In a real OS, this would do full context switching
-            // Cast entry_point to function pointer: void (*)(void*)
-            void (*task_func)(void*) = (void (*)(void*))task->entry_point;
-            task_func(task->args);
-
-            // Mark task as completed after running
-            task->state = TASK_STATE_PROCESSING;
-        }
-    }
+    // Future (v2): Implement PREEMPTIVE multitasking:
+    // 1. Save context in IRQ handler before calling this
+    // 2. Select next task here
+    // 3. Return next task's context to IRQ handler
+    // 4. IRQ handler restores new context and IRET
 }
 
 // ============================================================================
