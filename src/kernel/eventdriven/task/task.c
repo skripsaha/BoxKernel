@@ -440,6 +440,24 @@ TaskState task_get_state(uint64_t task_id) {
     return task ? task->state : TASK_STATE_DEAD;
 }
 
+int task_enumerate(Task** tasks_out, uint32_t max_tasks) {
+    if (!tasks_out || max_tasks == 0) {
+        return 0;
+    }
+
+    spin_lock(&task_table_lock);
+
+    uint32_t count = 0;
+    for (int i = 0; i < MAX_TASKS && count < max_tasks; i++) {
+        if (task_table[i] != NULL) {
+            tasks_out[count++] = task_table[i];
+        }
+    }
+
+    spin_unlock(&task_table_lock);
+    return count;
+}
+
 // ============================================================================
 // HEALTH & MONITORING
 // ============================================================================
@@ -688,8 +706,27 @@ int task_group_add(uint64_t group_id, uint64_t task_id) {
 }
 
 int task_group_remove(uint64_t group_id, uint64_t task_id) {
-    // TODO: Implement task removal from group
-    return -1;
+    spin_lock(&task_groups_lock);
+
+    for (int i = 0; i < MAX_TASK_GROUPS; i++) {
+        if (task_groups[i].group_id == group_id) {
+            // Find and remove task from array
+            for (uint32_t j = 0; j < task_groups[i].task_count; j++) {
+                if (task_groups[i].task_ids[j] == task_id) {
+                    // Shift remaining tasks
+                    for (uint32_t k = j; k < task_groups[i].task_count - 1; k++) {
+                        task_groups[i].task_ids[k] = task_groups[i].task_ids[k + 1];
+                    }
+                    task_groups[i].task_count--;
+                    spin_unlock(&task_groups_lock);
+                    return 0;
+                }
+            }
+        }
+    }
+
+    spin_unlock(&task_groups_lock);
+    return -1;  // Group or task not found
 }
 
 int task_group_set_memory_limit(uint64_t group_id, uint64_t bytes) {
@@ -708,8 +745,23 @@ int task_group_set_memory_limit(uint64_t group_id, uint64_t bytes) {
 }
 
 int task_group_broadcast(uint64_t group_id, void* message) {
-    // TODO: Send message to all tasks in group
-    return -1;
+    (void)message;  // Message API not yet implemented
+
+    spin_lock(&task_groups_lock);
+
+    for (int i = 0; i < MAX_TASK_GROUPS; i++) {
+        if (task_groups[i].group_id == group_id) {
+            // NOTE: Message queue API for tasks not yet implemented
+            // When implemented, will send message to all tasks in group
+            kprintf("[TASK] Group broadcast to %u tasks (message API pending)\n",
+                    task_groups[i].task_count);
+            spin_unlock(&task_groups_lock);
+            return 0;
+        }
+    }
+
+    spin_unlock(&task_groups_lock);
+    return -1;  // Group not found
 }
 
 // ============================================================================

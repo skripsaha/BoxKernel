@@ -196,6 +196,7 @@ Task* task_get(uint64_t task_id);
 Task* task_get_current(void);
 uint64_t task_get_current_id(void);
 TaskState task_get_state(uint64_t task_id);
+int task_enumerate(Task** tasks_out, uint32_t max_tasks);  // Get list of all tasks
 
 // === TASK GROUPS ===
 uint64_t task_group_create(const char* name);

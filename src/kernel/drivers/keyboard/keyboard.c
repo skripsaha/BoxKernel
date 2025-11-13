@@ -10,7 +10,7 @@
 static char keyboard_buffer[KEYBOARD_BUFFER_SIZE];
 static volatile uint32_t kb_head = 0;  // Write position
 static volatile uint32_t kb_tail = 0;  // Read position
-static volatile uint64_t kb_lock = 0;  // Spinlock
+static spinlock_t kb_lock = {0};       // Spinlock
 
 static keyboard_state_t kb_state = {0};
 
