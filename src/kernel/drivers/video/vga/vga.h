@@ -1,7 +1,7 @@
 #ifndef VGA_H
 #define VGA_H
 
-#include <stddef.h>
+#include "ktypes.h"
 
 #define VGA 0xB8000 //если так не получится - сделать replace "VGA" на "vga"
 extern unsigned char *vga;

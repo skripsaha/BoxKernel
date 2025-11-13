@@ -1,7 +1,6 @@
 #ifndef TAGFS_H
 #define TAGFS_H
 
-#include <stdint.h>
 #include "klib.h"  // Для spinlock_t и других типов
 #include "../core/atomics.h"
 

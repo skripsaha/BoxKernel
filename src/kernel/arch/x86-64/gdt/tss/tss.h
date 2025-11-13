@@ -1,7 +1,7 @@
 #ifndef TSS_H
 #define TSS_H
 
-#include <stdint.h>
+#include "ktypes.h"
 
 // IST индексы для критических прерываний
 #define IST_DOUBLE_FAULT    1

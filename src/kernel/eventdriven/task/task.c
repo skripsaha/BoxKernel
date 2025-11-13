@@ -3,7 +3,6 @@
 #include "pmm.h"
 #include "vmm.h"
 #include "cpu.h"
-#include <string.h>
 
 // ============================================================================
 // GLOBAL STATE

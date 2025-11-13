@@ -3,7 +3,7 @@
 
 #include "../core/events.h"
 #include "../core/atomics.h"
-#include <stdint.h>
+#include "ktypes.h"
 
 // ============================================================================
 // ROUTING TABLE - Hash table для хранения routing entries

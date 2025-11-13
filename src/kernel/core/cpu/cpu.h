@@ -14,7 +14,7 @@
 #ifndef CPU_H
 #define CPU_H
 
-#include <stdint.h>
+#include "ktypes.h"
 
 // Структура информации о CPU
 typedef struct {

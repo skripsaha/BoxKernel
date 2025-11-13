@@ -1,7 +1,7 @@
 #ifndef KEYBOARD_MAP_H
 #define KEYBOARD_MAP_H
 
-#include <stdint.h>
+#include "ktypes.h"
 
 // Размеры буферов
 #define KEYBOARD_MAP_SIZE 128

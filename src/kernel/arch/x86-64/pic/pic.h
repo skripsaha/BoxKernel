@@ -1,7 +1,7 @@
 #ifndef PIC_H
 #define PIC_H
 
-#include <stdint.h>
+#include "ktypes.h"
 
 // PIC порты
 #define PIC1_COMMAND    0x20

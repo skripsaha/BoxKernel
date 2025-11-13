@@ -1,7 +1,7 @@
 #ifndef ATOMICS_H
 #define ATOMICS_H
 
-#include <stdint.h>
+#include "ktypes.h"
 
 // ============================================================================
 // ATOMIC OPERATIONS - Lock-free примитивы

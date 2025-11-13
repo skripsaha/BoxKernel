@@ -2,9 +2,8 @@
 #include "vga.h"
 #include "io.h"
 #include "serial.h"
-#include <stdarg.h>
-#include <stddef.h>
-#include <stdbool.h>
+
+// NO STDLIB DEPENDENCIES - all types from ktypes.h and kstdarg.h
 
 // ========== Внутренние переменные ==========
 static uint8_t memory_pool[KLIB_MEMORY_POOL_SIZE];

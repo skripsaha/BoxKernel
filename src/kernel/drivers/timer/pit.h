@@ -1,7 +1,7 @@
 #ifndef PIT_H
 #define PIT_H
 
-#include <stdint.h>
+#include "ktypes.h"
 
 // PIT (Programmable Interval Timer) - Intel 8253/8254
 // Base frequency: 1.193182 MHz (1193182 Hz)

@@ -1,7 +1,7 @@
 #ifndef TASK_H
 #define TASK_H
 
-#include <stdint.h>
+#include "ktypes.h"
 #include "../core/atomics.h"
 #include "vmm.h"
 
