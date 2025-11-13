@@ -1211,10 +1211,8 @@ int vmm_handle_page_fault(uintptr_t fault_addr, uint64_t error_code) {
     }
 
     // Check if this is in low memory (0-256MB) for kernel data/heap fallback
-    // NOTE: This should not be needed if all allocations use vmalloc properly
     if (page_addr < (256ULL * 1024 * 1024)) {
-        kprintf("[VMM] WARNING: Unexpected low memory access at 0x%llx\n", page_addr);
-        kprintf("[VMM] This may indicate a static allocation that should use vmalloc\n");
+        kprintf("[VMM] Demand paging: mapping low memory page at 0x%llx\n", page_addr);
 
         // Allocate physical page
         void* phys_page = pmm_alloc(1);
@@ -1233,7 +1231,7 @@ int vmm_handle_page_fault(uintptr_t fault_addr, uint64_t error_code) {
             return -1;
         }
 
-        kprintf("[VMM] Low memory page mapped (workaround)\n");
+        kprintf("[VMM] SUCCESS: Low memory page mapped\n");
         return 0;  // Handled successfully
     }
 

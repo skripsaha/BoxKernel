@@ -215,8 +215,8 @@ void irq_handler(interrupt_frame_t* frame) {
             // Таймер - уменьшили частоту логирования
             if (irq_count[0] % 1000 == 0) {  // Каждые ~55 секунд вместо 5.5
                 uint64_t minutes = irq_count[0] > 1100 ? irq_count[0] / 1100 : 0;
-                kprintf("%[H]Timer: %llu ticks (~%llu minutes)%[D]\n",
-                       irq_count[0], minutes);
+                // kprintf("%[H]Timer: %llu ticks (~%llu minutes)%[D]\n",
+                //        irq_count[0], minutes);
             }
             break;
             
