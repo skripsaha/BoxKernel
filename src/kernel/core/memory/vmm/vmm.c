@@ -490,17 +490,12 @@ void* vmm_alloc_pages(vmm_context_t* ctx, size_t page_count, uint64_t flags) {
         return NULL;
     }
 
-    kprintf("[VMM] vmm_alloc_pages: requesting %zu pages with flags 0x%llx\n", page_count, (unsigned long long)flags);
-
     // Allocate physical pages first (returns pointer to physical memory)
     void* phys_pages = pmm_alloc(page_count);
     if (!phys_pages) {
         vmm_set_error("Failed to allocate physical pages");
-        kprintf("[VMM] PMM allocation failed for %zu pages\n", page_count);
         return NULL;
     }
-
-    kprintf("[VMM] PMM allocated %zu pages at physical 0x%p\n", page_count, phys_pages);
 
     uintptr_t phys_base = (uintptr_t)phys_pages;
     uintptr_t virt_base;
@@ -512,18 +507,12 @@ void* vmm_alloc_pages(vmm_context_t* ctx, size_t page_count, uint64_t flags) {
         if (!virt_base) {
             pmm_free(phys_pages, page_count);
             vmm_set_error("Failed to find user virtual address space");
-            kprintf("[VMM] Failed to find user virtual space for %zu pages\n", page_count);
             return NULL;
         }
-        kprintf("[VMM] Found user virtual space at 0x%p\n", (void*)virt_base);
     } else {
         // Kernel allocation - use simple sequential allocation
         spin_lock(&kernel_heap_lock);
         virt_base = kernel_heap_current;
-
-        kprintf("[VMM] Current kernel heap pointer: 0x%p\n", (void*)kernel_heap_current);
-        kprintf("[VMM] Kernel heap base: 0x%p\n", (void*)VMM_KERNEL_HEAP_BASE);
-        kprintf("[VMM] Kernel heap size: 0x%llx\n", (unsigned long long)VMM_KERNEL_HEAP_SIZE);
 
         // Check if we have enough space (basic check)
         if (virt_base + vmm_pages_to_size(page_count) > VMM_KERNEL_HEAP_BASE + VMM_KERNEL_HEAP_SIZE) {
@@ -538,18 +527,12 @@ void* vmm_alloc_pages(vmm_context_t* ctx, size_t page_count, uint64_t flags) {
 
         kernel_heap_current += vmm_pages_to_size(page_count);
         spin_unlock(&kernel_heap_lock);
-
-        kprintf("[VMM] Kernel allocation: virt=0x%p, phys=0x%p, pages=%zu\n",
-               (void*)virt_base, (void*)phys_base, page_count);
     }
 
     // Map the pages individually for better error handling
     for (size_t i = 0; i < page_count; i++) {
         uintptr_t virt_addr = virt_base + i * VMM_PAGE_SIZE;
         uintptr_t phys_addr = phys_base + i * VMM_PAGE_SIZE;
-
-        kprintf("[VMM] Mapping page %zu/%zu: virt=0x%p -> phys=0x%p\n",
-               i + 1, page_count, (void*)virt_addr, (void*)phys_addr);
 
         vmm_map_result_t result = vmm_map_page(ctx, virt_addr, phys_addr, flags);
 
@@ -603,21 +586,17 @@ void vmm_free_pages(vmm_context_t* ctx, void* virt_addr, size_t page_count) {
 // ========== KERNEL HEAP (vmalloc) ==========
 void* vmalloc(size_t size) {
     if (size == 0) {
-        kprintf("[VMM] vmalloc: size is 0\n");
         return NULL;
     }
 
     if (!vmm_initialized) {
-        kprintf("[VMM] vmalloc: VMM not initialized\n");
         return NULL;
     }
 
     size_t page_count = vmm_size_to_pages(size);
-    kprintf("[VMM] vmalloc: requested %zu bytes (%zu pages)\n", size, page_count);
 
     vmm_context_t* ctx = vmm_get_current_context();
     if (!ctx) {
-        kprintf("[VMM] vmalloc: no current context\n");
         return NULL;
     }
 
@@ -626,10 +605,6 @@ void* vmalloc(size_t size) {
         kprintf("[VMM] vmalloc FAILED: %s\n", vmm_get_last_error());
         return NULL;
     }
-
-    uintptr_t phys_first = vmm_virt_to_phys(ctx, (uintptr_t)virt);
-    kprintf("[VMM] vmalloc: allocated virt=%p phys=%p pages=%zu\n",
-            virt, (void*)phys_first, page_count);
 
     // Register allocation for vfree
     vmalloc_entry_t* ent = kmalloc(sizeof(vmalloc_entry_t));
@@ -640,12 +615,8 @@ void* vmalloc(size_t size) {
         ent->next = vmalloc_list;
         vmalloc_list = ent;
         spin_unlock(&vmalloc_lock);
-        kprintf("[VMM] vmalloc: recorded allocation (%p, %zu pages)\n", virt, page_count);
-    } else {
-        kprintf("[VMM] vmalloc: WARNING: could not record allocation for vfree()\n");
     }
 
-    kprintf("[VMM] vmalloc SUCCESS: %p (%zu pages)\n", virt, page_count);
     return virt;
 }
 
