@@ -1,7 +1,7 @@
 #ifndef SHELL_H
 #define SHELL_H
 
-#include <stdint.h>
+#include "ktypes.h"
 
 // Shell configuration
 #define SHELL_INPUT_BUFFER_SIZE 256

@@ -1,7 +1,7 @@
 #ifndef EVENTS_H
 #define EVENTS_H
 
-#include <stdint.h>
+#include "ktypes.h"
 
 // ============================================================================
 // EVENT TYPES - Типы событий в системе

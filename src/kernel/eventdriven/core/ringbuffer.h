@@ -3,7 +3,7 @@
 
 #include "events.h"
 #include "atomics.h"
-#include <stdint.h>
+#include "ktypes.h"
 
 // ============================================================================
 // RING BUFFER - Lock-free SPSC (Single Producer Single Consumer)

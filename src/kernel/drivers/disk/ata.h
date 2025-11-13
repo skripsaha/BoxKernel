@@ -1,7 +1,7 @@
 #ifndef ATA_H
 #define ATA_H
 
-#include <stdint.h>
+#include "ktypes.h"
 
 // ============================================================================
 // ATA/IDE Driver - Primary Interface для работы с жестким диском

@@ -1,9 +1,6 @@
 #include "pmm.h"
 #include "e820.h"
 #include "klib.h"
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
 
 typedef struct {
     uintptr_t base;

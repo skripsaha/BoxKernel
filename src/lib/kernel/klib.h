@@ -1,10 +1,12 @@
 #ifndef KLIB_H
 #define KLIB_H
 
-#include <stddef.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <stdarg.h>
+// ============================================================================
+// BOXOS KERNEL LIBRARY - 100% INDEPENDENT, NO STDLIB!
+// ============================================================================
+
+#include "ktypes.h"   // Replaces stdint.h, stddef.h, stdbool.h
+#include "kstdarg.h"  // Replaces stdarg.h
 
 // Объявления для линкера
 extern uintptr_t _kernel_end;

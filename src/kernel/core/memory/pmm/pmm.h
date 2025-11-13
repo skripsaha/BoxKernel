@@ -1,9 +1,6 @@
 #ifndef PMM_H
 #define PMM_H
 
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
 #include "klib.h"
 
 #define PMM_PAGE_SIZE       4096

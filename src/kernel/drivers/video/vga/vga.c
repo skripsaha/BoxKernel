@@ -1,7 +1,6 @@
 #include "vga.h"
 #include "io.h"
 #include "klib.h"
-#include <stdint.h>
 
 unsigned char *vga = (unsigned char*)VGA;
 

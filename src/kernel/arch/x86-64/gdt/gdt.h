@@ -1,7 +1,7 @@
 #ifndef GDT_H
 #define GDT_H
 
-#include <stdint.h>
+#include "ktypes.h"
 
 // GDT селекторы
 #define GDT_KERNEL_CODE   0x08

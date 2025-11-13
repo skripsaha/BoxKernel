@@ -1,4 +1,4 @@
-#include <stdint.h>
+#include "ktypes.h"
 #include "fpu.h"
 
 void enable_fpu(void) {

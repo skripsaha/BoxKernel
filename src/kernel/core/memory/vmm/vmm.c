@@ -1175,7 +1175,7 @@ int vmm_handle_page_fault(uintptr_t fault_addr, uint64_t error_code) {
     kprintf("[VMM] Page not present - attempting demand paging\n");
 
     // Get kernel context
-    vmm_context_t* ctx = &kernel_context;
+    vmm_context_t* ctx = kernel_context;
 
     // Align fault address to page boundary
     uintptr_t page_addr = fault_addr & ~(VMM_PAGE_SIZE - 1);

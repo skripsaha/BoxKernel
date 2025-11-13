@@ -1,9 +1,7 @@
 #ifndef E820_H
 #define E820_H
 
-#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
+#include "ktypes.h"
 
 /* E820 Memory Types */
 #define E820_USABLE      1
