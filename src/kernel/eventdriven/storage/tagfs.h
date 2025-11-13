@@ -119,6 +119,25 @@ typedef struct {
 } TagFSSuperblock;
 
 // ============================================================================
+// USER CONTEXT - Контекст пользователя для фильтрации файлов
+// ============================================================================
+// Новая фича! Пользователь может установить контекст (набор тегов)
+// и видеть только файлы, у которых есть ВСЕ эти теги.
+//
+// Пример:
+//   use type:image size:small
+//   Теперь пользователь видит только маленькие картинки!
+//   Все операции (ls, eye и т.д.) работают только с этими файлами.
+
+#define TAGFS_MAX_CONTEXT_TAGS 16
+
+typedef struct {
+    Tag tags[TAGFS_MAX_CONTEXT_TAGS];   // Теги контекста
+    uint32_t tag_count;                  // Количество тегов в контексте
+    bool enabled;                        // Включен ли контекст
+} TagFSUserContext;
+
+// ============================================================================
 // TAGFS CONTEXT - Runtime состояние файловой системы
 // ============================================================================
 
@@ -133,6 +152,9 @@ typedef struct {
     volatile uint64_t next_inode_id;    // Счётчик для генерации inode ID
 
     spinlock_t lock;                    // Spinlock для синхронизации доступа
+
+    // User Context для фильтрации (NEW!)
+    TagFSUserContext user_context;      // Текущий контекст пользователя
 
     // Статистика
     volatile uint64_t files_created;
@@ -199,14 +221,30 @@ int tagfs_load_inode_table(void);
 // Создать файл с тегами
 uint64_t tagfs_create_file(Tag* tags, uint32_t tag_count);
 
-// Удалить файл (помечает trashed:true, реальное удаление отложено)
-int tagfs_delete_file(uint64_t inode_id);
+// Создать файл с данными
+uint64_t tagfs_create_file_with_data(Tag* tags, uint32_t tag_count,
+                                     const uint8_t* data, uint64_t size);
+
+// Удалить файл (помечает trashed:true, мягкое удаление - в корзину)
+int tagfs_trash_file(uint64_t inode_id);
+
+// Полностью удалить файл с диска (стирает данные и метаданные)
+int tagfs_erase_file(uint64_t inode_id);
+
+// Восстановить файл из корзины
+int tagfs_restore_file(uint64_t inode_id);
 
 // Чтение данных файла
 int tagfs_read_file(uint64_t inode_id, uint64_t offset, uint8_t* buffer, uint64_t size);
 
 // Запись данных в файл
 int tagfs_write_file(uint64_t inode_id, uint64_t offset, const uint8_t* buffer, uint64_t size);
+
+// Получить весь контент файла (удобная обертка)
+uint8_t* tagfs_read_file_content(uint64_t inode_id, uint64_t* size_out);
+
+// Записать весь контент файла (удобная обертка)
+int tagfs_write_file_content(uint64_t inode_id, const uint8_t* data, uint64_t size);
 
 // Получить метаданные файла
 FileInode* tagfs_get_inode(uint64_t inode_id);
@@ -248,6 +286,27 @@ void tagfs_index_remove_file(uint64_t inode_id);
 void tagfs_index_rebuild(void);  // Пересборка индекса (если повреждён)
 
 // ============================================================================
+// USER CONTEXT OPERATIONS (NEW!)
+// ============================================================================
+
+// Установить контекст пользователя (фильтр по тегам)
+// После этого все операции (поиск, список) работают только с файлами,
+// у которых есть ВСЕ указанные теги
+int tagfs_context_set(Tag* tags, uint32_t tag_count);
+
+// Очистить контекст (показать все файлы)
+void tagfs_context_clear(void);
+
+// Получить текущий контекст
+TagFSUserContext* tagfs_context_get(void);
+
+// Проверить, подходит ли файл под текущий контекст
+bool tagfs_context_matches(uint64_t inode_id);
+
+// Получить список файлов в текущем контексте
+int tagfs_context_list_files(uint64_t* result_inodes, uint32_t* count_out, uint32_t max_results);
+
+// ============================================================================
 // UTILITY FUNCTIONS
 // ============================================================================
 
@@ -259,6 +318,9 @@ int tagfs_tag_equal(const Tag* a, const Tag* b);
 
 // Проверить есть ли тег у файла
 int tagfs_file_has_tag(uint64_t inode_id, const Tag* tag);
+
+// Найти файл по имени (тегу name:xxx) в текущем контексте
+uint64_t tagfs_find_by_name(const char* name);
 
 // ============================================================================
 // STATISTICS & DEBUGGING

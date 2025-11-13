@@ -1385,3 +1385,283 @@ void tagfs_print_tag_index(void) {
                 entry->file_count);
     }
 }
+
+// ============================================================================
+// USER CONTEXT OPERATIONS - NEW!
+// ============================================================================
+
+// Установить контекст пользователя
+int tagfs_context_set(Tag* tags, uint32_t tag_count) {
+    if (tag_count > TAGFS_MAX_CONTEXT_TAGS) {
+        kprintf("[TAGFS] ERROR: Too many context tags (%u > %u)\n",
+                tag_count, TAGFS_MAX_CONTEXT_TAGS);
+        return -1;
+    }
+
+    spin_lock(&global_tagfs.lock);
+
+    // Копируем теги
+    for (uint32_t i = 0; i < tag_count; i++) {
+        global_tagfs.user_context.tags[i] = tags[i];
+    }
+    global_tagfs.user_context.tag_count = tag_count;
+    global_tagfs.user_context.enabled = true;
+
+    spin_unlock(&global_tagfs.lock);
+
+    kprintf("[TAGFS] Context set: %u tags\n", tag_count);
+    for (uint32_t i = 0; i < tag_count; i++) {
+        kprintf("  - %s:%s\n", tags[i].key, tags[i].value);
+    }
+
+    return 0;
+}
+
+// Очистить контекст
+void tagfs_context_clear(void) {
+    spin_lock(&global_tagfs.lock);
+    global_tagfs.user_context.enabled = false;
+    global_tagfs.user_context.tag_count = 0;
+    spin_unlock(&global_tagfs.lock);
+
+    kprintf("[TAGFS] Context cleared (showing all files)\n");
+}
+
+// Получить текущий контекст
+TagFSUserContext* tagfs_context_get(void) {
+    return &global_tagfs.user_context;
+}
+
+// Проверить, подходит ли файл под текущий контекст
+bool tagfs_context_matches(uint64_t inode_id) {
+    if (!global_tagfs.user_context.enabled) {
+        return true;  // Контекст выключен - показываем все файлы
+    }
+
+    FileInode* inode = tagfs_get_inode(inode_id);
+    if (!inode) {
+        return false;
+    }
+
+    // Проверяем, что файл имеет ВСЕ теги из контекста
+    for (uint32_t i = 0; i < global_tagfs.user_context.tag_count; i++) {
+        if (!tagfs_file_has_tag(inode_id, &global_tagfs.user_context.tags[i])) {
+            return false;  // Нет одного из тегов - не подходит
+        }
+    }
+
+    return true;  // Все теги есть - подходит!
+}
+
+// Получить список файлов в текущем контексте
+int tagfs_context_list_files(uint64_t* result_inodes, uint32_t* count_out, uint32_t max_results) {
+    uint32_t result_count = 0;
+
+    uint32_t safe_max_inodes = global_tagfs.superblock->total_inodes;
+    if (safe_max_inodes > TAGFS_MAX_FILES) {
+        safe_max_inodes = TAGFS_MAX_FILES;
+    }
+
+    // Перебираем все файлы и фильтруем по контексту
+    for (uint32_t i = 0; i < safe_max_inodes && result_count < max_results; i++) {
+        FileInode* inode = &global_tagfs.inode_table[i];
+        if (inode->inode_id != 0) {
+            // Пропускаем удаленные файлы
+            Tag trash_tag = tagfs_tag_from_string("trashed:true");
+            if (tagfs_file_has_tag(inode->inode_id, &trash_tag)) {
+                continue;
+            }
+
+            // Проверяем соответствие контексту
+            if (tagfs_context_matches(inode->inode_id)) {
+                result_inodes[result_count++] = inode->inode_id;
+            }
+        }
+    }
+
+    *count_out = result_count;
+    return 0;
+}
+
+// ============================================================================
+// EXTENDED FILE OPERATIONS - NEW!
+// ============================================================================
+
+// Создать файл с данными
+uint64_t tagfs_create_file_with_data(Tag* tags, uint32_t tag_count,
+                                     const uint8_t* data, uint64_t size) {
+    // Создаем файл
+    uint64_t inode_id = tagfs_create_file(tags, tag_count);
+    if (inode_id == TAGFS_INVALID_INODE) {
+        return TAGFS_INVALID_INODE;
+    }
+
+    // Записываем данные
+    if (tagfs_write_file_content(inode_id, data, size) != 0) {
+        kprintf("[TAGFS] ERROR: Failed to write file content\n");
+        // Можно удалить файл, но оставим для отладки
+        return TAGFS_INVALID_INODE;
+    }
+
+    return inode_id;
+}
+
+// Удалить файл в корзину (мягкое удаление)
+int tagfs_trash_file(uint64_t inode_id) {
+    FileInode* inode = tagfs_get_inode(inode_id);
+    if (!inode) {
+        kprintf("[TAGFS] ERROR: File not found (inode=%lu)\n", inode_id);
+        return -1;
+    }
+
+    // Добавляем тег trashed:true
+    Tag trash_tag = tagfs_tag_from_string("trashed:true");
+    int result = tagfs_add_tag(inode_id, &trash_tag);
+
+    if (result == 0) {
+        kprintf("[TAGFS] File moved to trash (inode=%lu)\n", inode_id);
+    }
+
+    return result;
+}
+
+// Восстановить файл из корзины
+int tagfs_restore_file(uint64_t inode_id) {
+    FileInode* inode = tagfs_get_inode(inode_id);
+    if (!inode) {
+        kprintf("[TAGFS] ERROR: File not found (inode=%lu)\n", inode_id);
+        return -1;
+    }
+
+    // Удаляем тег trashed:true
+    int result = tagfs_remove_tag(inode_id, "trashed");
+
+    if (result == 0) {
+        kprintf("[TAGFS] File restored from trash (inode=%lu)\n", inode_id);
+    }
+
+    return result;
+}
+
+// Полностью удалить файл с диска (жесткое удаление)
+int tagfs_erase_file(uint64_t inode_id) {
+    FileInode* inode = tagfs_get_inode(inode_id);
+    if (!inode) {
+        kprintf("[TAGFS] ERROR: File not found (inode=%lu)\n", inode_id);
+        return -1;
+    }
+
+    spin_lock(&global_tagfs.lock);
+
+    // Освобождаем все блоки данных
+    for (int i = 0; i < 12; i++) {
+        if (inode->direct_blocks[i] != 0) {
+            bitmap_clear_bit(global_tagfs.block_bitmap, inode->direct_blocks[i]);
+            global_tagfs.superblock->free_blocks++;
+            inode->direct_blocks[i] = 0;
+        }
+    }
+
+    // TODO: Освободить indirect и double_indirect блоки
+
+    // Удаляем из индекса тегов
+    tagfs_index_remove_file(inode_id);
+
+    // Очищаем inode
+    memset(inode, 0, sizeof(FileInode));
+
+    // Освобождаем inode bitmap
+    bitmap_clear_bit(global_tagfs.inode_bitmap, inode_id);
+    global_tagfs.superblock->free_inodes++;
+
+    global_tagfs.files_deleted++;
+
+    spin_unlock(&global_tagfs.lock);
+
+    kprintf("[TAGFS] File erased completely (inode=%lu)\n", inode_id);
+    return 0;
+}
+
+// Получить весь контент файла
+uint8_t* tagfs_read_file_content(uint64_t inode_id, uint64_t* size_out) {
+    FileInode* inode = tagfs_get_inode(inode_id);
+    if (!inode) {
+        kprintf("[TAGFS] ERROR: File not found (inode=%lu)\n", inode_id);
+        return NULL;
+    }
+
+    if (inode->size == 0) {
+        *size_out = 0;
+        return NULL;
+    }
+
+    // Выделяем память для данных
+    uint8_t* buffer = (uint8_t*)kmalloc(inode->size + 1);  // +1 для null terminator
+    if (!buffer) {
+        kprintf("[TAGFS] ERROR: Failed to allocate buffer (%lu bytes)\n", inode->size);
+        return NULL;
+    }
+
+    // Читаем данные
+    int result = tagfs_read_file(inode_id, 0, buffer, inode->size);
+    if (result != 0) {
+        kprintf("[TAGFS] ERROR: Failed to read file\n");
+        kfree(buffer);
+        return NULL;
+    }
+
+    buffer[inode->size] = '\0';  // Null terminator для строк
+    *size_out = inode->size;
+    return buffer;
+}
+
+// Записать весь контент файла
+int tagfs_write_file_content(uint64_t inode_id, const uint8_t* data, uint64_t size) {
+    FileInode* inode = tagfs_get_inode(inode_id);
+    if (!inode) {
+        kprintf("[TAGFS] ERROR: File not found (inode=%lu)\n", inode_id);
+        return -1;
+    }
+
+    // Записываем данные с начала файла
+    int result = tagfs_write_file(inode_id, 0, data, size);
+    if (result != 0) {
+        kprintf("[TAGFS] ERROR: Failed to write file\n");
+        return -1;
+    }
+
+    return 0;
+}
+
+// Найти файл по имени (тегу name:xxx) в текущем контексте
+uint64_t tagfs_find_by_name(const char* name) {
+    // Создаем тег name:xxx
+    char tag_str[128];
+    ksnprintf(tag_str, sizeof(tag_str), "name:%s", name);
+    Tag name_tag = tagfs_tag_from_string(tag_str);
+
+    // Ищем файлы с этим тегом
+    uint64_t result_inodes[256];
+    uint32_t count = 0;
+    int result = tagfs_query_single(&name_tag, result_inodes, &count, 256);
+
+    if (result != 0 || count == 0) {
+        return TAGFS_INVALID_INODE;  // Не найдено
+    }
+
+    // Фильтруем по контексту
+    for (uint32_t i = 0; i < count; i++) {
+        // Пропускаем удаленные файлы
+        Tag trash_tag = tagfs_tag_from_string("trashed:true");
+        if (tagfs_file_has_tag(result_inodes[i], &trash_tag)) {
+            continue;
+        }
+
+        // Проверяем соответствие контексту
+        if (tagfs_context_matches(result_inodes[i])) {
+            return result_inodes[i];  // Нашли!
+        }
+    }
+
+    return TAGFS_INVALID_INODE;  // Не найдено в контексте
+}

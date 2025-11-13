@@ -27,6 +27,12 @@ static shell_command_t commands[] = {
     {"cat", "Display file contents", cmd_cat},
     {"touch", "Create file with tags", cmd_touch},
     {"rm", "Remove file by name", cmd_rm},
+    {"create", "Create file with content", cmd_create},
+    {"eye", "View file contents (like cat)", cmd_eye},
+    {"use", "Set tag context filter", cmd_use},
+    {"trash", "Move file to trash", cmd_trash},
+    {"erase", "Permanently delete file", cmd_erase},
+    {"restore", "Restore file from trash", cmd_restore},
     {"ps", "List running tasks", cmd_ps},
     {"info", "Show system information", cmd_info},
     {"reboot", "Reboot the system", cmd_reboot},
@@ -370,15 +376,15 @@ int cmd_rm(int argc, char** argv) {
         return 1;
     }
 
-    // Delete first matching file
-    result = tagfs_delete_file(inode_ids[0]);
+    // Delete first matching file (move to trash)
+    result = tagfs_trash_file(inode_ids[0]);
 
     if (result < 0) {
         kprintf("%[E]Failed to delete file: %s%[D]\n", argv[1]);
         return 1;
     }
 
-    kprintf("%[S]Removed: %s (inode=%lu)%[D]\n", argv[1], inode_ids[0]);
+    kprintf("%[S]Moved to trash: %s (inode=%lu)%[D]\n", argv[1], inode_ids[0]);
     return 0;
 }
 
@@ -463,6 +469,251 @@ int cmd_info(int argc, char** argv) {
     kprintf("  Blocks: 128 (512 KB total)\n");
 
     kprintf("\n");
+    return 0;
+}
+
+// ============================================================================
+// COMMAND: create - Create file with content
+// ============================================================================
+
+int cmd_create(int argc, char** argv) {
+    if (argc < 3) {
+        kprintf("%[E]Usage: create <filename> <tag1:val1> [tag2:val2] ... [--data \"content\"]%[D]\n");
+        kprintf("Example: create myfile.txt name:myfile type:text --data \"Hello World\"\n");
+        return 1;
+    }
+
+    // Парсим теги и данные
+    Tag tags[TAGFS_MAX_TAGS_PER_FILE];
+    uint32_t tag_count = 0;
+    const char* data = NULL;
+
+    // Первый аргумент - имя файла (становится тегом name:xxx)
+    char name_tag_str[128];
+    ksnprintf(name_tag_str, sizeof(name_tag_str), "name:%s", argv[1]);
+    tags[tag_count++] = tagfs_tag_from_string(name_tag_str);
+
+    // Парсим остальные теги
+    int i = 2;
+    while (i < argc) {
+        if (strcmp(argv[i], "--data") == 0 && i + 1 < argc) {
+            data = argv[i + 1];
+            i += 2;
+        } else {
+            if (tag_count >= TAGFS_MAX_TAGS_PER_FILE) {
+                kprintf("%[E]Too many tags (max %d)%[D]\n", TAGFS_MAX_TAGS_PER_FILE);
+                return 1;
+            }
+            tags[tag_count++] = tagfs_tag_from_string(argv[i]);
+            i++;
+        }
+    }
+
+    // Создаем файл
+    uint64_t inode_id;
+    if (data) {
+        inode_id = tagfs_create_file_with_data(tags, tag_count, (const uint8_t*)data, strlen(data));
+    } else {
+        inode_id = tagfs_create_file(tags, tag_count);
+    }
+
+    if (inode_id == TAGFS_INVALID_INODE) {
+        kprintf("%[E]Failed to create file%[D]\n");
+        return 1;
+    }
+
+    kprintf("%[S]File created: inode=%lu%[D]\n", inode_id);
+    return 0;
+}
+
+// ============================================================================
+// COMMAND: eye - View file contents (like cat but cooler name)
+// ============================================================================
+
+int cmd_eye(int argc, char** argv) {
+    if (argc < 2) {
+        kprintf("%[E]Usage: eye <filename>%[D]\n");
+        return 1;
+    }
+
+    // Ищем файл по имени
+    uint64_t inode_id = tagfs_find_by_name(argv[1]);
+    if (inode_id == TAGFS_INVALID_INODE) {
+        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
+        return 1;
+    }
+
+    // Читаем содержимое
+    uint64_t size;
+    uint8_t* content = tagfs_read_file_content(inode_id, &size);
+    if (!content) {
+        kprintf("%[E]Failed to read file%[D]\n");
+        return 1;
+    }
+
+    // Выводим содержимое
+    kprintf("\n%[H]──────────────────────────────────────────────%[D]\n");
+    kprintf("%[H]File: %s (inode=%lu, size=%lu bytes)%[D]\n", argv[1], inode_id, size);
+    kprintf("%[H]──────────────────────────────────────────────%[D]\n\n");
+
+    if (size > 0) {
+        kprintf("%s\n", (char*)content);
+    } else {
+        kprintf("%[W](empty file)%[D]\n");
+    }
+
+    kprintf("\n%[H]──────────────────────────────────────────────%[D]\n\n");
+
+    kfree(content);
+    return 0;
+}
+
+// ============================================================================
+// COMMAND: use - Set tag context filter
+// ============================================================================
+
+int cmd_use(int argc, char** argv) {
+    if (argc < 2) {
+        kprintf("%[E]Usage: use <tag1:val1> [tag2:val2] ...%[D]\n");
+        kprintf("       use clear  (to clear context)%[D]\n");
+        kprintf("\nExample: use type:image size:small\n");
+        kprintf("After this, you'll only see files with BOTH tags!\n");
+        return 1;
+    }
+
+    // Проверяем команду clear
+    if (strcmp(argv[1], "clear") == 0) {
+        tagfs_context_clear();
+        return 0;
+    }
+
+    // Парсим теги
+    Tag tags[TAGFS_MAX_CONTEXT_TAGS];
+    uint32_t tag_count = 0;
+
+    for (int i = 1; i < argc && tag_count < TAGFS_MAX_CONTEXT_TAGS; i++) {
+        tags[tag_count++] = tagfs_tag_from_string(argv[i]);
+    }
+
+    // Устанавливаем контекст
+    int result = tagfs_context_set(tags, tag_count);
+    if (result != 0) {
+        kprintf("%[E]Failed to set context%[D]\n");
+        return 1;
+    }
+
+    // Показываем сколько файлов теперь видно
+    uint64_t result_inodes[256];
+    uint32_t count;
+    tagfs_context_list_files(result_inodes, &count, 256);
+    kprintf("%[S]Context active: %u files match%[D]\n", count);
+
+    return 0;
+}
+
+// ============================================================================
+// COMMAND: trash - Move file to trash
+// ============================================================================
+
+int cmd_trash(int argc, char** argv) {
+    if (argc < 2) {
+        kprintf("%[E]Usage: trash <filename>%[D]\n");
+        return 1;
+    }
+
+    // Ищем файл по имени
+    uint64_t inode_id = tagfs_find_by_name(argv[1]);
+    if (inode_id == TAGFS_INVALID_INODE) {
+        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
+        return 1;
+    }
+
+    // Перемещаем в корзину
+    int result = tagfs_trash_file(inode_id);
+    if (result != 0) {
+        kprintf("%[E]Failed to trash file%[D]\n");
+        return 1;
+    }
+
+    kprintf("%[S]File moved to trash: %s%[D]\n", argv[1]);
+    kprintf("(Use 'restore %s' to restore it)\n", argv[1]);
+    return 0;
+}
+
+// ============================================================================
+// COMMAND: erase - Permanently delete file
+// ============================================================================
+
+int cmd_erase(int argc, char** argv) {
+    if (argc < 2) {
+        kprintf("%[E]Usage: erase <filename>%[D]\n");
+        kprintf("%[W]WARNING: This permanently deletes the file!%[D]\n");
+        return 1;
+    }
+
+    // Ищем файл по имени (включая в корзине)
+    char tag_str[128];
+    ksnprintf(tag_str, sizeof(tag_str), "name:%s", argv[1]);
+    Tag name_tag = tagfs_tag_from_string(tag_str);
+
+    uint64_t result_inodes[256];
+    uint32_t count;
+    tagfs_query_single(&name_tag, result_inodes, &count, 256);
+
+    if (count == 0) {
+        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
+        return 1;
+    }
+
+    // Берем первый найденный файл
+    uint64_t inode_id = result_inodes[0];
+
+    // Удаляем полностью
+    int result = tagfs_erase_file(inode_id);
+    if (result != 0) {
+        kprintf("%[E]Failed to erase file%[D]\n");
+        return 1;
+    }
+
+    kprintf("%[S]File permanently erased: %s%[D]\n", argv[1]);
+    return 0;
+}
+
+// ============================================================================
+// COMMAND: restore - Restore file from trash
+// ============================================================================
+
+int cmd_restore(int argc, char** argv) {
+    if (argc < 2) {
+        kprintf("%[E]Usage: restore <filename>%[D]\n");
+        return 1;
+    }
+
+    // Ищем файл по имени (включая в корзине)
+    char tag_str[128];
+    ksnprintf(tag_str, sizeof(tag_str), "name:%s", argv[1]);
+    Tag name_tag = tagfs_tag_from_string(tag_str);
+
+    uint64_t result_inodes[256];
+    uint32_t count;
+    tagfs_query_single(&name_tag, result_inodes, &count, 256);
+
+    if (count == 0) {
+        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
+        return 1;
+    }
+
+    // Берем первый найденный файл
+    uint64_t inode_id = result_inodes[0];
+
+    // Восстанавливаем
+    int result = tagfs_restore_file(inode_id);
+    if (result != 0) {
+        kprintf("%[E]Failed to restore file%[D]\n");
+        return 1;
+    }
+
+    kprintf("%[S]File restored from trash: %s%[D]\n", argv[1]);
     return 0;
 }
 
