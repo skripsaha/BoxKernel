@@ -115,6 +115,11 @@ page_table_t* vmm_get_or_create_table(vmm_context_t* ctx, uintptr_t virt_addr, i
 
         // Move to next level (phys -> virtual pointer)
         uintptr_t next_table_phys = vmm_pte_to_phys(*entry);
+
+        // CRITICAL: Treating physical address as virtual pointer!
+        // This relies on identity mapping (currently first 1GB)
+        // If next_table_phys >= 0x40000000, this will GPF!
+        // TODO: Implement phys_to_virt() for proper solution
         current_table = (page_table_t*)next_table_phys;
     }
 
@@ -134,6 +139,7 @@ static pte_t* vmm_get_pte_noalloc(vmm_context_t* ctx, uintptr_t virt_addr) {
     pte_t pml4_entry = pml4->entries[pml4_idx];
     if (!(pml4_entry & VMM_FLAG_PRESENT)) return NULL;
 
+    // CRITICAL: Physical addresses used as virtual pointers (relies on identity mapping)
     page_table_t* pdpt = (page_table_t*)vmm_pte_to_phys(pml4_entry);
     pte_t pdpt_entry = pdpt->entries[pdpt_idx];
     if (!(pdpt_entry & VMM_FLAG_PRESENT)) return NULL;
@@ -837,10 +843,11 @@ void vmm_init(void) {
     kprintf("[VMM] Kernel context created at %p\n", kernel_context);
     kprintf("[VMM] PML4 physical address: 0x%p\n", (void*)kernel_context->pml4_phys);
 
-    // Set up identity mapping for first 64MB (conservative)
-    kprintf("[VMM] Setting up identity mapping for first 64MB...\n");
+    // Set up identity mapping for first 1GB (extended to prevent GPF)
+    // This allows PMM to allocate page tables anywhere in first 1GB without GPF
+    kprintf("[VMM] Setting up identity mapping for first 1GB...\n");
     size_t identity_pages = 0;
-    for (uintptr_t addr = 0; addr < 0x4000000; addr += VMM_PAGE_SIZE) { // 64MB
+    for (uintptr_t addr = 0; addr < 0x40000000; addr += VMM_PAGE_SIZE) { // 1GB
         vmm_map_result_t result = vmm_map_page(kernel_context, addr, addr, VMM_FLAGS_KERNEL_RW);
         if (result.success) {
             identity_pages++;
@@ -849,8 +856,8 @@ void vmm_init(void) {
                    (void*)addr, result.error_msg);
         }
     }
-    kprintf("[VMM] Identity mapped %zu pages (0x%p bytes)\n",
-           identity_pages, (void*)(identity_pages * VMM_PAGE_SIZE));
+    kprintf("[VMM] Identity mapped %zu pages (~%zu MB)\n",
+           identity_pages, (identity_pages * VMM_PAGE_SIZE) / (1024*1024));
 
     kprintf("[VMM] Kernel heap will be mapped on demand starting at 0x%p\n",
            (void*)VMM_KERNEL_HEAP_BASE);
