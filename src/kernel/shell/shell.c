@@ -23,11 +23,10 @@ static shell_command_t commands[] = {
     {"help", "Show available commands", cmd_help},
     {"clear", "Clear the screen", cmd_clear},
     {"echo", "Print text to console", cmd_echo},
-    {"ls", "List files in filesystem", cmd_ls},
+    {"ls", "List files (tag-based)", cmd_ls},
     {"cat", "Display file contents", cmd_cat},
-    {"mkdir", "Create a directory (placeholder)", cmd_mkdir},
-    {"touch", "Create an empty file", cmd_touch},
-    {"rm", "Remove a file (placeholder)", cmd_rm},
+    {"touch", "Create file with tags", cmd_touch},
+    {"rm", "Remove file by name", cmd_rm},
     {"ps", "List running tasks", cmd_ps},
     {"info", "Show system information", cmd_info},
     {"reboot", "Reboot the system", cmd_reboot},
@@ -189,13 +188,54 @@ int cmd_ls(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
-    kprintf("\n%[H]Filesystem Contents:%[D]\n");
-    kprintf("═══════════════════════════════════════════════════\n");
+    kprintf("\n%[H]Filesystem Contents (Tag-Based):%[D]\n");
+    kprintf("════════════════════════════════════════════════════════════════════\n");
+    kprintf("%-8s %-20s %-10s %s\n", "Inode", "Name", "Size", "Tags");
+    kprintf("────────────────────────────────────────────────────────────────────\n");
 
-    // TODO: Implement proper ls with TagFS query
-    kprintf("(filesystem listing not yet implemented)\n");
-    kprintf("\n");
+    // Access inode table directly (we're in kernel mode)
+    extern TagFSContext global_tagfs;
+    uint32_t file_count = 0;
 
+    for (uint64_t i = 1; i < global_tagfs.superblock->total_inodes; i++) {
+        FileInode* inode = &global_tagfs.inode_table[i];
+
+        // Skip empty inodes
+        if (inode->inode_id == 0 || inode->size == 0xFFFFFFFFFFFFFFFF) {
+            continue;
+        }
+
+        // Get filename from name tag
+        char filename[TAGFS_TAG_VALUE_SIZE] = "<unnamed>";
+        for (uint32_t t = 0; t < inode->tag_count; t++) {
+            if (strcmp(inode->tags[t].key, "name") == 0) {
+                strncpy(filename, inode->tags[t].value, TAGFS_TAG_VALUE_SIZE);
+                break;
+            }
+        }
+
+        // Print file info
+        kprintf("%-8lu %-20s %-10lu ", inode->inode_id, filename, inode->size);
+
+        // Print tags
+        kprintf("[");
+        for (uint32_t t = 0; t < inode->tag_count && t < 3; t++) {
+            if (strcmp(inode->tags[t].key, "name") != 0) {  // Skip name tag
+                kprintf("%s:%s", inode->tags[t].key, inode->tags[t].value);
+                if (t < inode->tag_count - 1) kprintf(", ");
+            }
+        }
+        if (inode->tag_count > 3) kprintf("...");
+        kprintf("]\n");
+
+        file_count++;
+    }
+
+    if (file_count == 0) {
+        kprintf("(no files)\n");
+    }
+
+    kprintf("\nTotal files: %u\n\n", file_count);
     return 0;
 }
 
@@ -209,29 +249,61 @@ int cmd_cat(int argc, char** argv) {
         return 1;
     }
 
-    kprintf("\n%[H]File: %s%[D]\n", argv[1]);
-    kprintf("═══════════════════════════════════════════════════\n");
+    // Find file by name tag
+    Tag name_tag;
+    strncpy(name_tag.key, "name", TAGFS_TAG_KEY_SIZE);
+    strncpy(name_tag.value, argv[1], TAGFS_TAG_VALUE_SIZE);
 
-    // TODO: Implement file reading with TagFS
-    kprintf("(file reading not yet implemented)\n");
-    kprintf("\n");
+    uint64_t inode_ids[16];
+    uint32_t count = 0;
+    int result = tagfs_query_single(&name_tag, inode_ids, &count, 16);
 
-    return 0;
-}
-
-// ============================================================================
-// COMMAND: mkdir
-// ============================================================================
-
-int cmd_mkdir(int argc, char** argv) {
-    if (argc < 2) {
-        kprintf("%[E]Usage: mkdir <dirname>%[D]\n");
+    if (result < 0 || count == 0) {
+        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
         return 1;
     }
 
-    kprintf("%[S]Created directory: %s%[D]\n", argv[1]);
+    uint64_t inode_id = inode_ids[0];
+    FileInode* inode = tagfs_get_inode(inode_id);
+
+    if (!inode) {
+        kprintf("%[E]Failed to get inode: %lu%[D]\n", inode_id);
+        return 1;
+    }
+
+    kprintf("\n%[H]File: %s (inode=%lu, size=%lu bytes)%[D]\n",
+            argv[1], inode_id, inode->size);
+    kprintf("═══════════════════════════════════════════════════\n");
+
+    if (inode->size == 0) {
+        kprintf("(empty file)\n");
+    } else {
+        // Read file content (max 4KB for display)
+        uint8_t buffer[4096];
+        uint64_t read_size = (inode->size > 4096) ? 4096 : inode->size;
+
+        result = tagfs_read_file(inode_id, 0, buffer, read_size);
+
+        if (result < 0) {
+            kprintf("%[E]Failed to read file%[D]\n");
+            return 1;
+        }
+
+        // Print content (assuming text)
+        for (uint64_t i = 0; i < read_size; i++) {
+            kprintf("%c", buffer[i]);
+        }
+
+        if (inode->size > 4096) {
+            kprintf("\n... (truncated, file is %lu bytes) ...\n", inode->size);
+        }
+    }
+
+    kprintf("\n");
     return 0;
 }
+
+// NOTE: mkdir removed - TagFS uses tags, not directories!
 
 // ============================================================================
 // COMMAND: touch
@@ -239,11 +311,38 @@ int cmd_mkdir(int argc, char** argv) {
 
 int cmd_touch(int argc, char** argv) {
     if (argc < 2) {
-        kprintf("%[E]Usage: touch <filename>%[D]\n");
+        kprintf("%[E]Usage: touch <filename> [tag1:value1] [tag2:value2] ...%[D]\n");
+        kprintf("Example: touch myfile.txt type:document format:txt\n");
         return 1;
     }
 
-    kprintf("%[S]Created file: %s%[D]\n", argv[1]);
+    // Create tags array (filename + additional tags)
+    Tag tags[TAGFS_MAX_TAGS_PER_FILE];
+    uint32_t tag_count = 0;
+
+    // First tag: name:filename
+    strncpy(tags[tag_count].key, "name", TAGFS_TAG_KEY_SIZE);
+    strncpy(tags[tag_count].value, argv[1], TAGFS_TAG_VALUE_SIZE);
+    tag_count++;
+
+    // Parse additional tags from command line
+    for (int i = 2; i < argc && tag_count < TAGFS_MAX_TAGS_PER_FILE; i++) {
+        Tag tag = tagfs_tag_from_string(argv[i]);
+        if (tag.key[0] != '\0') {  // Valid tag
+            tags[tag_count++] = tag;
+        }
+    }
+
+    // Create file
+    uint64_t inode_id = tagfs_create_file(tags, tag_count);
+
+    if (inode_id == TAGFS_INVALID_INODE) {
+        kprintf("%[E]Failed to create file: %s%[D]\n", argv[1]);
+        return 1;
+    }
+
+    kprintf("%[S]Created file '%s' (inode=%lu) with %u tags%[D]\n",
+            argv[1], inode_id, tag_count);
     return 0;
 }
 
@@ -257,7 +356,29 @@ int cmd_rm(int argc, char** argv) {
         return 1;
     }
 
-    kprintf("%[S]Removed: %s%[D]\n", argv[1]);
+    // Find file by name tag
+    Tag name_tag;
+    strncpy(name_tag.key, "name", TAGFS_TAG_KEY_SIZE);
+    strncpy(name_tag.value, argv[1], TAGFS_TAG_VALUE_SIZE);
+
+    uint64_t inode_ids[16];
+    uint32_t count = 0;
+    int result = tagfs_query_single(&name_tag, inode_ids, &count, 16);
+
+    if (result < 0 || count == 0) {
+        kprintf("%[E]File not found: %s%[D]\n", argv[1]);
+        return 1;
+    }
+
+    // Delete first matching file
+    result = tagfs_delete_file(inode_ids[0]);
+
+    if (result < 0) {
+        kprintf("%[E]Failed to delete file: %s%[D]\n", argv[1]);
+        return 1;
+    }
+
+    kprintf("%[S]Removed: %s (inode=%lu)%[D]\n", argv[1], inode_ids[0]);
     return 0;
 }
 
@@ -270,14 +391,38 @@ int cmd_ps(int argc, char** argv) {
     (void)argv;
 
     kprintf("\n%[H]Running Tasks:%[D]\n");
-    kprintf("═══════════════════════════════════════════════════\n");
-    kprintf("%-6s %-20s %-10s %-10s\n", "ID", "Name", "State", "Energy");
-    kprintf("───────────────────────────────────────────────────\n");
+    kprintf("═══════════════════════════════════════════════════════════════════\n");
+    kprintf("%-6s %-20s %-12s %-8s %-8s %-8s\n",
+            "ID", "Name", "State", "Energy", "Health", "Events");
+    kprintf("───────────────────────────────────────────────────────────────────\n");
 
-    // TODO: Implement task listing via task system API
-    kprintf("(task listing not yet implemented)\n");
-    kprintf("Use the task system API to enumerate tasks.\n");
+    // Get all tasks
+    Task* tasks[256];
+    int count = task_enumerate(tasks, 256);
 
+    if (count == 0) {
+        kprintf("No tasks running.\n");
+    } else {
+        const char* state_names[] = {
+            "Idle", "Running", "Waiting", "Sleeping",
+            "Blocked", "Paused", "Zombie", "Dead"
+        };
+
+        for (int i = 0; i < count; i++) {
+            Task* t = tasks[i];
+            const char* state_str = (t->state < 8) ? state_names[t->state] : "Unknown";
+
+            kprintf("%-6lu %-20s %-12s %-8u %-8u %-8lu\n",
+                    t->task_id,
+                    t->name,
+                    state_str,
+                    t->energy_allocated,
+                    t->health,
+                    t->events_processed);
+        }
+    }
+
+    kprintf("\nTotal tasks: %d\n", count);
     kprintf("\n");
     return 0;
 }
