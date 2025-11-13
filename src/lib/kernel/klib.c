@@ -336,9 +336,12 @@ int kprintf(const char* format, ...) {
                 continue;
             }
 
-            // --- Парсим zero-pad и ширину ---
-            int pad_zero = 0, pad_width = 0;
-            if (*format == '0') {
+            // --- Парсим флаги: '-' (left-align), '0' (zero-pad) ---
+            int left_align = 0, pad_zero = 0, pad_width = 0;
+            if (*format == '-') {
+                left_align = 1;
+                ++format;
+            } else if (*format == '0') {
                 pad_zero = 1;
                 ++format;
             }
@@ -388,12 +391,23 @@ int kprintf(const char* format, ...) {
                     }
                     len = strlen(buf);
                     int total = len + negative;
-                    for (int i = total; i < pad_width; ++i) {
-                        kputchar(pad_zero ? '0' : ' ');
-                        ++count;
+
+                    // Print with alignment
+                    if (left_align) {
+                        if (negative) { kputchar('-'); ++count; }
+                        for (char* p = buf; *p; ++p) { kputchar(*p); ++count; }
+                        for (int i = total; i < pad_width; ++i) {
+                            kputchar(' ');
+                            ++count;
+                        }
+                    } else {
+                        for (int i = total; i < pad_width; ++i) {
+                            kputchar(pad_zero ? '0' : ' ');
+                            ++count;
+                        }
+                        if (negative) { kputchar('-'); ++count; }
+                        for (char* p = buf; *p; ++p) { kputchar(*p); ++count; }
                     }
-                    if (negative) { kputchar('-'); ++count; }
-                    for (char* p = buf; *p; ++p) { kputchar(*p); ++count; }
                     break;
                 }
                 case 'u': {
@@ -414,11 +428,21 @@ int kprintf(const char* format, ...) {
                         utoa(num, buf, 10);
                     }
                     len = strlen(buf);
-                    for (int i = len; i < pad_width; ++i) {
-                        kputchar(pad_zero ? '0' : ' ');
-                        ++count;
+
+                    // Print with alignment
+                    if (left_align) {
+                        for (char* p = buf; *p; ++p) { kputchar(*p); ++count; }
+                        for (int i = len; i < pad_width; ++i) {
+                            kputchar(' ');
+                            ++count;
+                        }
+                    } else {
+                        for (int i = len; i < pad_width; ++i) {
+                            kputchar(pad_zero ? '0' : ' ');
+                            ++count;
+                        }
+                        for (char* p = buf; *p; ++p) { kputchar(*p); ++count; }
                     }
-                    for (char* p = buf; *p; ++p) { kputchar(*p); ++count; }
                     break;
                 }
                 case 'x': case 'X': {
@@ -439,13 +463,26 @@ int kprintf(const char* format, ...) {
                         utoa(num, buf, 16);
                     }
                     len = strlen(buf);
-                    for (int i = len; i < pad_width; ++i) {
-                        kputchar(pad_zero ? '0' : ' ');
-                        ++count;
-                    }
-                    for (char* p = buf; *p; ++p) { 
-                        kputchar((*format == 'X') ? toupper(*p) : *p); 
-                        ++count; 
+
+                    // Print with alignment
+                    if (left_align) {
+                        for (char* p = buf; *p; ++p) {
+                            kputchar((*format == 'X') ? toupper(*p) : *p);
+                            ++count;
+                        }
+                        for (int i = len; i < pad_width; ++i) {
+                            kputchar(' ');
+                            ++count;
+                        }
+                    } else {
+                        for (int i = len; i < pad_width; ++i) {
+                            kputchar(pad_zero ? '0' : ' ');
+                            ++count;
+                        }
+                        for (char* p = buf; *p; ++p) {
+                            kputchar((*format == 'X') ? toupper(*p) : *p);
+                            ++count;
+                        }
                     }
                     break;
                 }
@@ -467,11 +504,21 @@ int kprintf(const char* format, ...) {
                     const char* str = va_arg(args, const char*);
                     if (!str) str = "(null)";
                     int len = strlen(str);
-                    for (int i = len; i < pad_width; ++i) {
-                        kputchar(' ');
-                        ++count;
+
+                    // Print with alignment
+                    if (left_align) {
+                        while (*str) { kputchar(*str++); ++count; }
+                        for (int i = len; i < pad_width; ++i) {
+                            kputchar(' ');
+                            ++count;
+                        }
+                    } else {
+                        for (int i = len; i < pad_width; ++i) {
+                            kputchar(' ');
+                            ++count;
+                        }
+                        while (*str) { kputchar(*str++); ++count; }
                     }
-                    while (*str) { kputchar(*str++); ++count; }
                     break;
                 }
                 case 'f': {
