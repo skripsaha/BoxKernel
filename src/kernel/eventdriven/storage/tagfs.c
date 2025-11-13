@@ -10,8 +10,7 @@ TagFSContext global_tagfs;
 
 // Простое хранилище блоков в памяти (fallback если диск недоступен)
 #define TAGFS_MEM_BLOCKS 128  // 512MB виртуального диска (128 * 4KB)
-// Use pointer instead of static array to avoid BSS allocation
-static uint8_t (*tagfs_storage)[TAGFS_BLOCK_SIZE] = NULL;
+static uint8_t tagfs_storage[TAGFS_MEM_BLOCKS][TAGFS_BLOCK_SIZE];
 
 // Использовать реальный диск или память?
 static int use_disk = 0;  // 0 = память, 1 = диск
@@ -544,22 +543,6 @@ int tagfs_tag_equal(const Tag* a, const Tag* b) {
 void tagfs_init(void) {
     kprintf("[TAGFS] Initializing tag-based filesystem...\n");
 
-    // Allocate storage in kernel heap (high memory) instead of BSS (low memory)
-    if (!tagfs_storage) {
-        size_t storage_size = TAGFS_MEM_BLOCKS * TAGFS_BLOCK_SIZE;
-        kprintf("[TAGFS] Allocating %lu KB for filesystem storage...\n", storage_size / 1024);
-
-        tagfs_storage = (uint8_t (*)[TAGFS_BLOCK_SIZE])vmalloc(storage_size);
-        if (!tagfs_storage) {
-            kprintf("[TAGFS] ERROR: Failed to allocate storage!\n");
-            return;
-        }
-
-        // Zero out the storage
-        memset(tagfs_storage, 0, storage_size);
-        kprintf("[TAGFS] Storage allocated at %p\n", tagfs_storage);
-    }
-
     memset(&global_tagfs, 0, sizeof(TagFSContext));
 
     // Allocate superblock in memory
@@ -605,33 +588,48 @@ void tagfs_init(void) {
         kprintf("[TAGFS] Creating new filesystem...\n");
         tagfs_format(TAGFS_MEM_BLOCKS);
 
-        kprintf("[TAGFS] DEBUG: After format, superblock values:\n");
-        kprintf("[TAGFS] DEBUG:   magic=0x%lx\n", global_tagfs.superblock->magic);
-        kprintf("[TAGFS] DEBUG:   inode_table_block=%lu\n", global_tagfs.superblock->inode_table_block);
-        kprintf("[TAGFS] DEBUG:   tag_index_block=%lu\n", global_tagfs.superblock->tag_index_block);
-        kprintf("[TAGFS] DEBUG:   data_blocks_start=%lu\n", global_tagfs.superblock->data_blocks_start);
-        kprintf("[TAGFS] DEBUG:   total_blocks=%lu\n", global_tagfs.superblock->total_blocks);
-        kprintf("[TAGFS] DEBUG:   total_inodes=%lu\n", global_tagfs.superblock->total_inodes);
-
-        // DON'T sync to disk - it's causing corruption!
-        // Just use memory mode for now
+        // Если диск доступен, записываем новую ФС на диск
         if (disk_available) {
-            kprintf("[TAGFS] SKIPPING disk sync to avoid corruption\n");
-            tagfs_set_disk_mode(0);  // Disable disk mode temporarily
+            kprintf("[TAGFS] Writing new filesystem to disk...\n");
+            if (tagfs_sync() == 0) {
+                kprintf("[TAGFS] Filesystem synced to disk successfully!\n");
+            } else {
+                kprintf("[TAGFS] WARNING: Failed to sync filesystem to disk\n");
+            }
         }
     }
 
-    // REMOVED: Validation checks that cause infinite reformat loop
-    // These checks were reading corrupted data and triggering endless reformatting
-    kprintf("[TAGFS] DEBUG: Validation checks SKIPPED to avoid reformat loop\n");
-    kprintf("[TAGFS] DEBUG: Final superblock values:\n");
-    kprintf("[TAGFS] DEBUG:   magic=0x%lx (expected 0x%lx)\n",
-            global_tagfs.superblock->magic, TAGFS_MAGIC);
-    kprintf("[TAGFS] DEBUG:   inode_table_block=%lu\n", global_tagfs.superblock->inode_table_block);
-    kprintf("[TAGFS] DEBUG:   tag_index_block=%lu\n", global_tagfs.superblock->tag_index_block);
-    kprintf("[TAGFS] DEBUG:   data_blocks_start=%lu\n", global_tagfs.superblock->data_blocks_start);
-    kprintf("[TAGFS] DEBUG:   total_blocks=%lu\n", global_tagfs.superblock->total_blocks);
-    kprintf("[TAGFS] DEBUG:   total_inodes=%lu\n", global_tagfs.superblock->total_inodes);
+    // Validate superblock values to prevent out-of-bounds access
+    if (global_tagfs.superblock->inode_table_block >= TAGFS_MEM_BLOCKS) {
+        kprintf("[TAGFS] ERROR: Invalid inode_table_block (%lu >= %u), reformatting...\n",
+                global_tagfs.superblock->inode_table_block, TAGFS_MEM_BLOCKS);
+        tagfs_format(TAGFS_MEM_BLOCKS);
+    }
+
+    if (global_tagfs.superblock->data_blocks_start > TAGFS_MEM_BLOCKS) {
+        kprintf("[TAGFS] ERROR: Invalid data_blocks_start (%lu > %u), reformatting...\n",
+                global_tagfs.superblock->data_blocks_start, TAGFS_MEM_BLOCKS);
+        tagfs_format(TAGFS_MEM_BLOCKS);
+    }
+
+    if (global_tagfs.superblock->total_blocks > TAGFS_MEM_BLOCKS) {
+        kprintf("[TAGFS] ERROR: Invalid total_blocks (%lu > %u), reformatting...\n",
+                global_tagfs.superblock->total_blocks, TAGFS_MEM_BLOCKS);
+        tagfs_format(TAGFS_MEM_BLOCKS);
+    }
+
+    // Validate total_inodes doesn't exceed available space
+    uint64_t available_inode_blocks = 0;
+    if (global_tagfs.superblock->tag_index_block > global_tagfs.superblock->inode_table_block) {
+        available_inode_blocks = global_tagfs.superblock->tag_index_block - global_tagfs.superblock->inode_table_block;
+    }
+    uint64_t max_possible_inodes = (available_inode_blocks * TAGFS_BLOCK_SIZE) / TAGFS_INODE_SIZE;
+
+    if (global_tagfs.superblock->total_inodes > max_possible_inodes) {
+        kprintf("[TAGFS] ERROR: Invalid total_inodes (%lu > max %lu), reformatting...\n",
+                global_tagfs.superblock->total_inodes, max_possible_inodes);
+        tagfs_format(TAGFS_MEM_BLOCKS);
+    }
 
     // Setup inode table (starts at block 1)
     global_tagfs.inode_table = (FileInode*)tagfs_storage[global_tagfs.superblock->inode_table_block];
@@ -684,22 +682,12 @@ void tagfs_init(void) {
 void tagfs_format(uint64_t total_blocks) {
     kprintf("[TAGFS] Formatting filesystem with %lu blocks...\n", total_blocks);
 
-    // Clear storage (tagfs_storage is now a pointer, not an array!)
-    size_t storage_size = TAGFS_MEM_BLOCKS * TAGFS_BLOCK_SIZE;
+    // Clear storage
+    memset(tagfs_storage, 0, sizeof(tagfs_storage));
 
-    kprintf("[TAGFS-FORMAT] DEBUG: tagfs_storage pointer = %p\n", (void*)tagfs_storage);
-    kprintf("[TAGFS-FORMAT] DEBUG: &tagfs_storage[0] = %p\n", (void*)&tagfs_storage[0]);
-    kprintf("[TAGFS-FORMAT] DEBUG: tagfs_storage[0] = %p\n", (void*)tagfs_storage[0]);
-    kprintf("[TAGFS-FORMAT] DEBUG: global_tagfs.superblock = %p\n", (void*)global_tagfs.superblock);
-
-    memset(tagfs_storage, 0, storage_size);
-
-    // Initialize superblock - USE global_tagfs.superblock directly!
-    TagFSSuperblock* sb = global_tagfs.superblock;
-    kprintf("[TAGFS-FORMAT] DEBUG: sb pointer = %p\n", (void*)sb);
-
+    // Initialize superblock
+    TagFSSuperblock* sb = (TagFSSuperblock*)tagfs_storage[0];
     sb->magic = TAGFS_MAGIC;
-    kprintf("[TAGFS-FORMAT] DEBUG: Just wrote magic, reading back: 0x%lx\n", sb->magic);
     sb->version = TAGFS_VERSION;
     sb->block_size = TAGFS_BLOCK_SIZE;
     sb->total_blocks = total_blocks;
