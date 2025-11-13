@@ -115,11 +115,6 @@ page_table_t* vmm_get_or_create_table(vmm_context_t* ctx, uintptr_t virt_addr, i
 
         // Move to next level (phys -> virtual pointer)
         uintptr_t next_table_phys = vmm_pte_to_phys(*entry);
-
-        // CRITICAL: Treating physical address as virtual pointer!
-        // This relies on identity mapping (currently first 1GB)
-        // If next_table_phys >= 0x40000000, this will GPF!
-        // TODO: Implement phys_to_virt() for proper solution
         current_table = (page_table_t*)next_table_phys;
     }
 
@@ -139,7 +134,6 @@ static pte_t* vmm_get_pte_noalloc(vmm_context_t* ctx, uintptr_t virt_addr) {
     pte_t pml4_entry = pml4->entries[pml4_idx];
     if (!(pml4_entry & VMM_FLAG_PRESENT)) return NULL;
 
-    // CRITICAL: Physical addresses used as virtual pointers (relies on identity mapping)
     page_table_t* pdpt = (page_table_t*)vmm_pte_to_phys(pml4_entry);
     pte_t pdpt_entry = pdpt->entries[pdpt_idx];
     if (!(pdpt_entry & VMM_FLAG_PRESENT)) return NULL;
@@ -496,12 +490,17 @@ void* vmm_alloc_pages(vmm_context_t* ctx, size_t page_count, uint64_t flags) {
         return NULL;
     }
 
+    kprintf("[VMM] vmm_alloc_pages: requesting %zu pages with flags 0x%llx\n", page_count, (unsigned long long)flags);
+
     // Allocate physical pages first (returns pointer to physical memory)
     void* phys_pages = pmm_alloc(page_count);
     if (!phys_pages) {
         vmm_set_error("Failed to allocate physical pages");
+        kprintf("[VMM] PMM allocation failed for %zu pages\n", page_count);
         return NULL;
     }
+
+    kprintf("[VMM] PMM allocated %zu pages at physical 0x%p\n", page_count, phys_pages);
 
     uintptr_t phys_base = (uintptr_t)phys_pages;
     uintptr_t virt_base;
@@ -513,12 +512,18 @@ void* vmm_alloc_pages(vmm_context_t* ctx, size_t page_count, uint64_t flags) {
         if (!virt_base) {
             pmm_free(phys_pages, page_count);
             vmm_set_error("Failed to find user virtual address space");
+            kprintf("[VMM] Failed to find user virtual space for %zu pages\n", page_count);
             return NULL;
         }
+        kprintf("[VMM] Found user virtual space at 0x%p\n", (void*)virt_base);
     } else {
         // Kernel allocation - use simple sequential allocation
         spin_lock(&kernel_heap_lock);
         virt_base = kernel_heap_current;
+
+        kprintf("[VMM] Current kernel heap pointer: 0x%p\n", (void*)kernel_heap_current);
+        kprintf("[VMM] Kernel heap base: 0x%p\n", (void*)VMM_KERNEL_HEAP_BASE);
+        kprintf("[VMM] Kernel heap size: 0x%llx\n", (unsigned long long)VMM_KERNEL_HEAP_SIZE);
 
         // Check if we have enough space (basic check)
         if (virt_base + vmm_pages_to_size(page_count) > VMM_KERNEL_HEAP_BASE + VMM_KERNEL_HEAP_SIZE) {
@@ -533,12 +538,18 @@ void* vmm_alloc_pages(vmm_context_t* ctx, size_t page_count, uint64_t flags) {
 
         kernel_heap_current += vmm_pages_to_size(page_count);
         spin_unlock(&kernel_heap_lock);
+
+        kprintf("[VMM] Kernel allocation: virt=0x%p, phys=0x%p, pages=%zu\n",
+               (void*)virt_base, (void*)phys_base, page_count);
     }
 
     // Map the pages individually for better error handling
     for (size_t i = 0; i < page_count; i++) {
         uintptr_t virt_addr = virt_base + i * VMM_PAGE_SIZE;
         uintptr_t phys_addr = phys_base + i * VMM_PAGE_SIZE;
+
+        kprintf("[VMM] Mapping page %zu/%zu: virt=0x%p -> phys=0x%p\n",
+               i + 1, page_count, (void*)virt_addr, (void*)phys_addr);
 
         vmm_map_result_t result = vmm_map_page(ctx, virt_addr, phys_addr, flags);
 
@@ -592,17 +603,21 @@ void vmm_free_pages(vmm_context_t* ctx, void* virt_addr, size_t page_count) {
 // ========== KERNEL HEAP (vmalloc) ==========
 void* vmalloc(size_t size) {
     if (size == 0) {
+        kprintf("[VMM] vmalloc: size is 0\n");
         return NULL;
     }
 
     if (!vmm_initialized) {
+        kprintf("[VMM] vmalloc: VMM not initialized\n");
         return NULL;
     }
 
     size_t page_count = vmm_size_to_pages(size);
+    kprintf("[VMM] vmalloc: requested %zu bytes (%zu pages)\n", size, page_count);
 
     vmm_context_t* ctx = vmm_get_current_context();
     if (!ctx) {
+        kprintf("[VMM] vmalloc: no current context\n");
         return NULL;
     }
 
@@ -611,6 +626,10 @@ void* vmalloc(size_t size) {
         kprintf("[VMM] vmalloc FAILED: %s\n", vmm_get_last_error());
         return NULL;
     }
+
+    uintptr_t phys_first = vmm_virt_to_phys(ctx, (uintptr_t)virt);
+    kprintf("[VMM] vmalloc: allocated virt=%p phys=%p pages=%zu\n",
+            virt, (void*)phys_first, page_count);
 
     // Register allocation for vfree
     vmalloc_entry_t* ent = kmalloc(sizeof(vmalloc_entry_t));
@@ -621,8 +640,12 @@ void* vmalloc(size_t size) {
         ent->next = vmalloc_list;
         vmalloc_list = ent;
         spin_unlock(&vmalloc_lock);
+        kprintf("[VMM] vmalloc: recorded allocation (%p, %zu pages)\n", virt, page_count);
+    } else {
+        kprintf("[VMM] vmalloc: WARNING: could not record allocation for vfree()\n");
     }
 
+    kprintf("[VMM] vmalloc SUCCESS: %p (%zu pages)\n", virt, page_count);
     return virt;
 }
 
@@ -843,11 +866,10 @@ void vmm_init(void) {
     kprintf("[VMM] Kernel context created at %p\n", kernel_context);
     kprintf("[VMM] PML4 physical address: 0x%p\n", (void*)kernel_context->pml4_phys);
 
-    // Set up identity mapping for first 1GB (extended to prevent GPF)
-    // This allows PMM to allocate page tables anywhere in first 1GB without GPF
-    kprintf("[VMM] Setting up identity mapping for first 1GB...\n");
+    // Set up identity mapping for first 64MB (conservative)
+    kprintf("[VMM] Setting up identity mapping for first 64MB...\n");
     size_t identity_pages = 0;
-    for (uintptr_t addr = 0; addr < 0x40000000; addr += VMM_PAGE_SIZE) { // 1GB
+    for (uintptr_t addr = 0; addr < 0x4000000; addr += VMM_PAGE_SIZE) { // 64MB
         vmm_map_result_t result = vmm_map_page(kernel_context, addr, addr, VMM_FLAGS_KERNEL_RW);
         if (result.success) {
             identity_pages++;
@@ -856,8 +878,8 @@ void vmm_init(void) {
                    (void*)addr, result.error_msg);
         }
     }
-    kprintf("[VMM] Identity mapped %zu pages (~%zu MB)\n",
-           identity_pages, (identity_pages * VMM_PAGE_SIZE) / (1024*1024));
+    kprintf("[VMM] Identity mapped %zu pages (0x%p bytes)\n",
+           identity_pages, (void*)(identity_pages * VMM_PAGE_SIZE));
 
     kprintf("[VMM] Kernel heap will be mapped on demand starting at 0x%p\n",
            (void*)VMM_KERNEL_HEAP_BASE);

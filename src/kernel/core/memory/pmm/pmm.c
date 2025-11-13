@@ -208,12 +208,7 @@ void* pmm_alloc(size_t pages) {
 
 void* pmm_alloc_zero(size_t pages) {
     void* addr = pmm_alloc(pages);
-    if (addr) {
-        // CRITICAL FIX: Physical address used as virtual pointer relies on identity mapping
-        // This works only if addr < identity_mapped_region (currently 1GB)
-        // TODO: Implement phys_to_virt() for proper solution
-        memset(addr, 0, pages * PMM_PAGE_SIZE);
-    }
+    if (addr) memset(addr, 0, pages * PMM_PAGE_SIZE);
     return addr;
 }
 
