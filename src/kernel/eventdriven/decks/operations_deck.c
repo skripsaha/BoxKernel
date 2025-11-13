@@ -1,6 +1,6 @@
 #include "deck_interface.h"
 #include "klib.h"
-#include "../task/task.h"  // ✅ NEW: Task system integration
+#include "../task/task.h"  // NEW: Task system integration
 
 // ============================================================================
 // OPERATIONS DECK - Task & IPC Operations
@@ -18,7 +18,7 @@ int operations_deck_process(RoutingEntry* entry) {
     Event* event = &entry->event_copy;
 
     switch (event->type) {
-        // === TASK OPERATIONS (✅ Real implementation) ===
+        // === TASK OPERATIONS (Real implementation) ===
         case EVENT_PROC_CREATE: {
             // Payload: [name_len:4][name:...][entry_point:8][energy:1]
             uint32_t name_len = *(uint32_t*)event->data;
@@ -27,11 +27,11 @@ int operations_deck_process(RoutingEntry* entry) {
             uint8_t energy = (event->data[4 + name_len + 8] != 0) ?
                               event->data[4 + name_len + 8] : 50;  // Default energy = 50
 
-            // ✅ Create task using new Task system
+            // Create task using new Task system
             Task* task = task_spawn(name, entry_point, energy);
 
             if (task) {
-                kprintf("[OPERATIONS] ✅ Event %lu: spawned task '%s' (ID=%lu, energy=%u)\n",
+                kprintf("[OPERATIONS] Event %lu: spawned task '%s' (ID=%lu, energy=%u)\n",
                         event->id, name, task->task_id, energy);
 
                 // Return task ID as result
@@ -40,7 +40,7 @@ int operations_deck_process(RoutingEntry* entry) {
                 deck_complete(entry, DECK_PREFIX_OPERATIONS, result);
                 return 1;
             } else {
-                kprintf("[OPERATIONS] ❌ Event %lu: failed to spawn task '%s'\n",
+                kprintf("[OPERATIONS] ERROR: Event %lu: failed to spawn task '%s'\n",
                         event->id, name);
                 deck_error(entry, DECK_PREFIX_OPERATIONS, 1);
                 return 0;
@@ -69,11 +69,11 @@ int operations_deck_process(RoutingEntry* entry) {
 
             int ret = task_kill(task_id);
             if (ret == 0) {
-                kprintf("[OPERATIONS] ✅ Event %lu: killed task %lu\n", event->id, task_id);
+                kprintf("[OPERATIONS] Event %lu: killed task %lu\n", event->id, task_id);
                 deck_complete(entry, DECK_PREFIX_OPERATIONS, 0);
                 return 1;
             } else {
-                kprintf("[OPERATIONS] ❌ Event %lu: failed to kill task %lu\n",
+                kprintf("[OPERATIONS] ERROR: Event %lu: failed to kill task %lu\n",
                         event->id, task_id);
                 deck_error(entry, DECK_PREFIX_OPERATIONS, 2);
                 return 0;
@@ -88,7 +88,7 @@ int operations_deck_process(RoutingEntry* entry) {
 
             int ret = task_sleep(task_id, milliseconds);
             if (ret == 0) {
-                kprintf("[OPERATIONS] ✅ Event %lu: task %lu sleeping for %lu ms\n",
+                kprintf("[OPERATIONS] Event %lu: task %lu sleeping for %lu ms\n",
                         event->id, task_id, milliseconds);
                 deck_complete(entry, DECK_PREFIX_OPERATIONS, 0);
                 return 1;
@@ -140,7 +140,7 @@ int operations_deck_process(RoutingEntry* entry) {
                     kprintf("[OPERATIONS] Task %lu woken up\n", task_id);
                     break;
                 default:
-                    kprintf("[OPERATIONS] ❌ Unknown task operation %u\n", operation);
+                    kprintf("[OPERATIONS] ERROR: Unknown task operation %u\n", operation);
                     break;
             }
 

@@ -1161,17 +1161,17 @@ int vmm_handle_page_fault(uintptr_t fault_addr, uint64_t error_code) {
 
     // Reserved bit violations are always fatal
     if (reserved) {
-        kprintf("[VMM] ❌ Reserved bit violation - cannot handle\n");
+        kprintf("[VMM] ERROR: Reserved bit violation - cannot handle\n");
         return -1;
     }
 
     // If page is present, it's a protection fault
     if (present) {
-        kprintf("[VMM] ❌ Protection fault - access denied\n");
+        kprintf("[VMM] ERROR: Protection fault - access denied\n");
         return -1;
     }
 
-    // Page not present - this is where demand paging would go
+    // Page not present - demand paging
     kprintf("[VMM] Page not present - attempting demand paging\n");
 
     // Get kernel context
@@ -1180,16 +1180,16 @@ int vmm_handle_page_fault(uintptr_t fault_addr, uint64_t error_code) {
     // Align fault address to page boundary
     uintptr_t page_addr = fault_addr & ~(VMM_PAGE_SIZE - 1);
 
-    // Check if this is in kernel heap range
-    if (page_addr >= VMM_KERNEL_HEAP_BASE && 
+    // Check if this is in kernel heap range (higher half)
+    if (page_addr >= VMM_KERNEL_HEAP_BASE &&
         page_addr < VMM_KERNEL_HEAP_BASE + VMM_KERNEL_HEAP_SIZE) {
-        
+
         kprintf("[VMM] Demand paging: mapping kernel heap page at 0x%llx\n", page_addr);
 
         // Allocate physical page
         void* phys_page = pmm_alloc(1);
         if (!phys_page) {
-            kprintf("[VMM] ❌ Failed to allocate physical page\n");
+            kprintf("[VMM] ERROR: Failed to allocate physical page\n");
             return -1;
         }
 
@@ -1201,16 +1201,41 @@ int vmm_handle_page_fault(uintptr_t fault_addr, uint64_t error_code) {
 
         vmm_map_result_t result = vmm_map_page(ctx, page_addr, (uintptr_t)phys_page, flags);
         if (!result.success) {
-            kprintf("[VMM] ❌ Failed to map page\n");
+            kprintf("[VMM] ERROR: Failed to map page\n");
             pmm_free(phys_page, 1);
             return -1;
         }
 
-        kprintf("[VMM] ✅ Demand paging successful\n");
+        kprintf("[VMM] SUCCESS: Demand paging successful\n");
+        return 0;  // Handled successfully
+    }
+
+    // Check if this is in low memory (0-64MB) for kernel data/heap fallback
+    if (page_addr < (64 * 1024 * 1024)) {
+        kprintf("[VMM] Demand paging: mapping low memory page at 0x%llx\n", page_addr);
+
+        // Allocate physical page
+        void* phys_page = pmm_alloc(1);
+        if (!phys_page) {
+            kprintf("[VMM] ERROR: Failed to allocate physical page\n");
+            return -1;
+        }
+
+        // Map the page (kernel mode, writable)
+        uint64_t flags = VMM_FLAG_PRESENT | VMM_FLAG_WRITABLE;
+
+        vmm_map_result_t result = vmm_map_page(ctx, page_addr, (uintptr_t)phys_page, flags);
+        if (!result.success) {
+            kprintf("[VMM] ERROR: Failed to map page\n");
+            pmm_free(phys_page, 1);
+            return -1;
+        }
+
+        kprintf("[VMM] SUCCESS: Low memory page mapped\n");
         return 0;  // Handled successfully
     }
 
     // Not in a valid range
-    kprintf("[VMM] ❌ Fault address not in valid range\n");
+    kprintf("[VMM] ERROR: Fault address not in valid range (0x%llx)\n", fault_addr);
     return -1;  // Cannot handle
 }

@@ -132,10 +132,39 @@ void idt_test(void) {
     kprintf("[IDT] %[W]Note: Actual interrupt testing will happen when PIC is configured%[D]\n");
 }
 
+// Static flag to track if we've already printed exception info for page faults
+static uint64_t last_page_fault_addr = 0;
+static int page_fault_printed = 0;
+
 // Обработчик исключений
 void exception_handler(interrupt_frame_t* frame) {
     exception_count++;
-    
+
+    // Special handling for page faults - try to handle silently
+    if (frame->vector == EXCEPTION_PAGE_FAULT) {
+        uint64_t cr2;
+        asm volatile("mov %%cr2, %0" : "=r" (cr2));
+
+        // Try to handle the page fault
+        if (vmm_handle_page_fault(cr2, frame->error_code) == 0) {
+            // Successfully handled - no need to print anything
+            return;
+        }
+
+        // Failed to handle - print error only once per address
+        if (cr2 != last_page_fault_addr || !page_fault_printed) {
+            kprintf("\n%[E]=== PAGE FAULT (unhandled) ===%[D]\n");
+            kprintf("%[E]Address: 0x%llx%[D]\n", cr2);
+            kprintf("%[E]Error Code: 0x%llx%[D]\n", frame->error_code);
+            kprintf("%[E]RIP: 0x%llx%[D]\n", frame->rip);
+            last_page_fault_addr = cr2;
+            page_fault_printed = 1;
+            panic("Unhandled page fault");
+        }
+        return;
+    }
+
+    // For other exceptions, print full details
     kprintf("\n%[E]=== EXCEPTION OCCURRED ===%[D]\n");
     kprintf("%[E]Exception Vector: %llu%[D]\n", frame->vector);
     kprintf("%[E]Error Code: 0x%llx%[D]\n", frame->error_code);
@@ -145,45 +174,25 @@ void exception_handler(interrupt_frame_t* frame) {
     kprintf("%[E]RSP: 0x%llx%[D]\n", frame->rsp);
     kprintf("%[E]SS: 0x%llx%[D]\n", frame->ss);
     kprintf("%[E]RAX: 0x%llx, RBX: 0x%llx%[D]\n", frame->rax, frame->rbx);
-    
+
     // Дополнительная информация для некоторых исключений
     switch(frame->vector) {
         case EXCEPTION_DIVIDE_ERROR:
             kprintf("%[E]Divide by zero error!%[D]\n");
-            kprintf("%[E]This usually means there's a division by zero in the code%[D]\n");
+            panic("Divide by zero");
             break;
-        case EXCEPTION_PAGE_FAULT: {
-            uint64_t cr2;
-            asm volatile("mov %%cr2, %0" : "=r" (cr2));
-            kprintf("%[E]Page fault at address: 0x%llx%[D]\n", cr2);
-
-            // Try to handle the page fault
-            if (vmm_handle_page_fault(cr2, frame->error_code) == 0) {
-                kprintf("%[S]Page fault handled successfully - continuing%[D]\n");
-                return;  // Successfully handled, continue execution
-            }
-            // If not handled, fall through to error handling below
-            break;
-        }
         case EXCEPTION_GENERAL_PROTECTION:
             kprintf("%[E]General Protection Fault!%[D]\n");
+            panic("General Protection Fault");
             break;
         case EXCEPTION_DOUBLE_FAULT:
             kprintf("%[E]Double Fault! System unstable!%[D]\n");
+            panic("Double Fault");
             break;
     }
-    
+
     kprintf("%[E]Total exceptions so far: %llu%[D]\n", exception_count);
-    
-    // Останавливаем систему при критических исключениях
-    if (frame->vector == EXCEPTION_DOUBLE_FAULT || 
-        frame->vector == EXCEPTION_MACHINE_CHECK) {
-        panic("Critical exception occurred");
-    }
-    
-    // Для отладки - продолжаем выполнение
-    kprintf("%[W]Continuing execution for debugging...%[D]\n");
-    kprintf("%[W]Press Ctrl+C in QEMU to stop if system hangs%[D]\n");
+    panic("Unhandled exception");
 }
 
 // Обработчик аппаратных прерываний (ИСПРАВЛЕНО)

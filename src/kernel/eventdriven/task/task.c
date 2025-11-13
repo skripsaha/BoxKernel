@@ -160,7 +160,7 @@ Task* task_spawn_with_args(const char* name, void* entry_point, void* args, uint
     // Allocate task structure
     Task* task = (Task*)kmalloc(sizeof(Task));
     if (!task) {
-        kprintf("[TASK] ❌ Failed to allocate task structure\n");
+        kprintf("[TASK] ERROR: Failed to allocate task structure\n");
         return NULL;
     }
 
@@ -197,7 +197,7 @@ Task* task_spawn_with_args(const char* name, void* entry_point, void* args, uint
     // Allocate stack
     task->stack_base = vmalloc(TASK_STACK_SIZE);
     if (!task->stack_base) {
-        kprintf("[TASK] ❌ Failed to allocate stack for task '%s'\n", name);
+        kprintf("[TASK] ERROR: Failed to allocate stack for task '%s'\n", name);
         kfree(task);
         return NULL;
     }
@@ -225,7 +225,7 @@ Task* task_spawn_with_args(const char* name, void* entry_point, void* args, uint
     // Allocate message queue
     task->message_queue = (TaskMessageQueue*)kmalloc(sizeof(TaskMessageQueue));
     if (!task->message_queue) {
-        kprintf("[TASK] ⚠️  Failed to allocate message queue for task '%s'\n", name);
+        kprintf("[TASK] WARNING: Failed to allocate message queue for task '%s'\n", name);
         vfree(task->stack_base);
         kfree(task);
         return NULL;
@@ -236,7 +236,7 @@ Task* task_spawn_with_args(const char* name, void* entry_point, void* args, uint
     // Add to task table
     int slot = task_table_insert(task);
     if (slot < 0) {
-        kprintf("[TASK] ❌ Task table full, cannot spawn '%s'\n", name);
+        kprintf("[TASK] ERROR: Task table full, cannot spawn '%s'\n", name);
         vfree(task->stack_base);
         kfree(task);
         return NULL;
@@ -248,7 +248,7 @@ Task* task_spawn_with_args(const char* name, void* entry_point, void* args, uint
     // Update statistics
     atomic_increment_u64(&tasks_created);
 
-    kprintf("[TASK] ✅ Spawned task '%s' (ID=%lu, energy=%u, stack=%p)\n",
+    kprintf("[TASK] Spawned task '%s' (ID=%lu, energy=%u, stack=%p)\n",
             name, task->task_id, energy, task->stack_base);
 
     return task;
@@ -261,7 +261,7 @@ Task* task_spawn_with_args(const char* name, void* entry_point, void* args, uint
 int task_kill(uint64_t task_id) {
     Task* task = task_get(task_id);
     if (!task) {
-        kprintf("[TASK] ❌ Cannot kill task %lu: not found\n", task_id);
+        kprintf("[TASK] ERROR: Cannot kill task %lu: not found\n", task_id);
         return -1;
     }
 
@@ -292,7 +292,7 @@ int task_kill(uint64_t task_id) {
 
     atomic_increment_u64(&tasks_destroyed);
 
-    kprintf("[TASK] ✅ Killed task %lu\n", task_id);
+    kprintf("[TASK] Killed task %lu\n", task_id);
     return 0;
 }
 
@@ -507,7 +507,7 @@ int task_auto_recover(Task* task) {
 
     // If health is low, try to recover
     if (task->health.overall_health < 30) {
-        kprintf("[TASK] ⚠️  Task %lu '%s' health=%u, attempting recovery\n",
+        kprintf("[TASK] WARNING: Task %lu '%s' health=%u, attempting recovery\n",
                 task->task_id, task->name, task->health.overall_health);
 
         // Strategy 1: If stalled, boost energy
@@ -519,7 +519,7 @@ int task_auto_recover(Task* task) {
 
         // Strategy 2: If low stability, log and consider restart
         if (task->health.stability < 30) {
-            kprintf("[TASK] ⚠️  Task %lu has low stability (many errors)\n", task->task_id);
+            kprintf("[TASK] WARNING: Task %lu has low stability (many errors)\n", task->task_id);
             // TODO: Could restart task here
             return -1;
         }
