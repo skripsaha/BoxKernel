@@ -159,9 +159,10 @@ void kernel_main(e820_entry_t* e820_map, uint64_t e820_count, uint64_t mem_start
     cpu_print_detailed_info();
 
     // === EVENT-DRIVEN DEMONSTRATION ===
-    kprintf("\n%[H]=== Running Event-Driven System Demo === %[D]\n");
-    eventdriven_demo_run();
-    kprintf("%[S] Demo completed!%[D]\n");
+    // DISABLED: Demo hangs, skipping to shell
+    // kprintf("\n%[H]=== Running Event-Driven System Demo === %[D]\n");
+    // eventdriven_demo_run();
+    // kprintf("%[S] Demo completed!%[D]\n");
 
     // === SHELL INITIALIZATION ===
     kprintf("\n%[H]=== Starting BoxOS Shell ===%[D]\n\n");
