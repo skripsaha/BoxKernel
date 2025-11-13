@@ -104,7 +104,7 @@ int tagfs_load_superblock(void) {
     kprintf("[TAGFS] Loading superblock from disk...\n");
 
     // Читаем блок 0
-    return tagfs_read_block_raw(0, (uint8_t*)tagfs_storage[0]);
+    return tagfs_read_block_raw(0, &tagfs_storage[0][0]);
 }
 
 // Записать inode table на диск
@@ -121,7 +121,7 @@ int tagfs_sync_inode_table(void) {
 
     // Пишем все блоки inode table
     for (uint64_t block = start_block; block < end_block; block++) {
-        if (tagfs_write_block_raw(block, tagfs_storage[block]) != 0) {
+        if (tagfs_write_block_raw(block, &tagfs_storage[block][0]) != 0) {
             kprintf("[TAGFS] ERROR: Failed to sync inode table block %lu\n", block);
             return -1;
         }
@@ -142,7 +142,7 @@ int tagfs_load_inode_table(void) {
     uint64_t end_block = global_tagfs.superblock->tag_index_block;
 
     for (uint64_t block = start_block; block < end_block; block++) {
-        if (tagfs_read_block_raw(block, tagfs_storage[block]) != 0) {
+        if (tagfs_read_block_raw(block, &tagfs_storage[block][0]) != 0) {
             kprintf("[TAGFS] ERROR: Failed to load inode table block %lu\n", block);
             return -1;
         }
@@ -181,7 +181,7 @@ int tagfs_sync(void) {
     for (uint64_t block = data_start; block < total_blocks; block++) {
         // Проверяем bitmap - пишем только занятые блоки
         if (bitmap_test_bit(global_tagfs.block_bitmap, block)) {
-            if (tagfs_write_block_raw(block, tagfs_storage[block]) != 0) {
+            if (tagfs_write_block_raw(block, &tagfs_storage[block][0]) != 0) {
                 kprintf("[TAGFS] ERROR: Failed to sync data block %lu\n", block);
                 return -1;
             }
@@ -269,7 +269,7 @@ static uint64_t tagfs_get_block_by_index(FileInode* inode, uint64_t block_idx) {
         }
 
         // Читаем указатель из indirect блока
-        uint64_t* indirect_table = (uint64_t*)tagfs_storage[inode->indirect_block];
+        uint64_t* indirect_table = (uint64_t*)&tagfs_storage[inode->indirect_block][0];
         return indirect_table[block_idx];
     }
 
@@ -291,7 +291,7 @@ static uint64_t tagfs_get_block_by_index(FileInode* inode, uint64_t block_idx) {
         uint64_t level1_idx = block_idx / PTRS_PER_BLOCK;
         uint64_t level2_idx = block_idx % PTRS_PER_BLOCK;
 
-        uint64_t* level1_table = (uint64_t*)tagfs_storage[inode->double_indirect_block];
+        uint64_t* level1_table = (uint64_t*)&tagfs_storage[inode->double_indirect_block][0];
         uint64_t level2_block = level1_table[level1_idx];
 
         if (level2_block == 0) {
@@ -304,7 +304,7 @@ static uint64_t tagfs_get_block_by_index(FileInode* inode, uint64_t block_idx) {
         }
 
         // Второй уровень
-        uint64_t* level2_table = (uint64_t*)tagfs_storage[level2_block];
+        uint64_t* level2_table = (uint64_t*)&tagfs_storage[level2_block][0];
         return level2_table[level2_idx];
     }
 
@@ -340,7 +340,7 @@ static uint64_t tagfs_alloc_block_by_index(FileInode* inode, uint64_t block_idx)
             return (uint64_t)-1;
         }
 
-        uint64_t* indirect_table = (uint64_t*)tagfs_storage[inode->indirect_block];
+        uint64_t* indirect_table = (uint64_t*)&tagfs_storage[inode->indirect_block][0];
 
         // Выделяем data block если ещё нет
         if (indirect_table[block_idx] == 0) {
@@ -370,7 +370,7 @@ static uint64_t tagfs_alloc_block_by_index(FileInode* inode, uint64_t block_idx)
         uint64_t level1_idx = block_idx / PTRS_PER_BLOCK;
         uint64_t level2_idx = block_idx % PTRS_PER_BLOCK;
 
-        uint64_t* level1_table = (uint64_t*)tagfs_storage[inode->double_indirect_block];
+        uint64_t* level1_table = (uint64_t*)&tagfs_storage[inode->double_indirect_block][0];
 
         // Выделяем level2 block если ещё нет
         if (level1_table[level1_idx] == 0) {
@@ -387,7 +387,7 @@ static uint64_t tagfs_alloc_block_by_index(FileInode* inode, uint64_t block_idx)
             return (uint64_t)-1;
         }
 
-        uint64_t* level2_table = (uint64_t*)tagfs_storage[level2_block];
+        uint64_t* level2_table = (uint64_t*)&tagfs_storage[level2_block][0];
 
         // Выделяем data block если ещё нет
         if (level2_table[level2_idx] == 0) {
@@ -405,7 +405,7 @@ static uint64_t tagfs_alloc_block_by_index(FileInode* inode, uint64_t block_idx)
 static void tagfs_free_indirect_blocks(FileInode* inode) {
     // Освобождаем single indirect
     if (inode->indirect_block != 0 && inode->indirect_block < TAGFS_MEM_BLOCKS) {
-        uint64_t* indirect_table = (uint64_t*)tagfs_storage[inode->indirect_block];
+        uint64_t* indirect_table = (uint64_t*)&tagfs_storage[inode->indirect_block][0];
 
         // Освобождаем все data blocks
         for (uint32_t i = 0; i < PTRS_PER_BLOCK; i++) {
@@ -421,14 +421,14 @@ static void tagfs_free_indirect_blocks(FileInode* inode) {
 
     // Освобождаем double indirect
     if (inode->double_indirect_block != 0 && inode->double_indirect_block < TAGFS_MEM_BLOCKS) {
-        uint64_t* level1_table = (uint64_t*)tagfs_storage[inode->double_indirect_block];
+        uint64_t* level1_table = (uint64_t*)&tagfs_storage[inode->double_indirect_block][0];
 
         // Проходим по всем level2 блокам
         for (uint32_t i = 0; i < PTRS_PER_BLOCK; i++) {
             uint64_t level2_block = level1_table[i];
 
             if (level2_block != 0 && level2_block < TAGFS_MEM_BLOCKS) {
-                uint64_t* level2_table = (uint64_t*)tagfs_storage[level2_block];
+                uint64_t* level2_table = (uint64_t*)&tagfs_storage[level2_block][0];
 
                 // Освобождаем все data blocks
                 for (uint32_t j = 0; j < PTRS_PER_BLOCK; j++) {
