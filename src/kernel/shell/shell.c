@@ -16,14 +16,33 @@
 static char input_buffer[SHELL_INPUT_BUFFER_SIZE];
 static uint32_t input_pos = 0;
 
-// Current user (simple implementation)
+// ============================================================================
+// USER SYSTEM
+// ============================================================================
+
+typedef struct {
+    char username[32];
+    char password[32];
+    int is_admin;
+} User;
+
+static User users[] = {
+    {"root", "toor", 1},
+    {"admin", "admin", 1},
+    {"guest", "guest", 0},
+    {"user", "user", 0},
+    {"\0", "\0", 0}  // Sentinel
+};
+
 static char current_user[32] = "root";
+static int current_user_is_admin = 1;
 
 // ============================================================================
 // COMMAND DECLARATIONS
 // ============================================================================
 
 int cmd_help(int argc, char** argv);
+int cmd_clear(int argc, char** argv);
 int cmd_create(int argc, char** argv);
 int cmd_eye(int argc, char** argv);
 int cmd_trash(int argc, char** argv);
@@ -38,6 +57,8 @@ int cmd_say(int argc, char** argv);
 int cmd_use(int argc, char** argv);
 int cmd_byebye(int argc, char** argv);
 int cmd_ls(int argc, char** argv);
+int cmd_whoami(int argc, char** argv);
+int cmd_login(int argc, char** argv);
 
 // ============================================================================
 // COMMAND TABLE
@@ -45,20 +66,23 @@ int cmd_ls(int argc, char** argv);
 
 static shell_command_t commands[] = {
     {"help", "Show available commands", cmd_help},
+    {"clear", "Clear the screen", cmd_clear},
+    {"ls", "List files", cmd_ls},
     {"create", "Create file with content and tags", cmd_create},
     {"eye", "View file contents", cmd_eye},
     {"trash", "Move file to trash", cmd_trash},
     {"erase", "Permanently delete file", cmd_erase},
-    {"info", "Show system information", cmd_info},
+    {"restore", "Restore file from trash", cmd_restore},
     {"tag", "Add tag to file", cmd_tag},
     {"untag", "Remove tag from file", cmd_untag},
-    {"restore", "Restore file from trash", cmd_restore},
-    {"edit", "Open text editor", cmd_edit},
-    {"reboot", "Reboot the system", cmd_reboot},
-    {"say", "Print text to console", cmd_say},
     {"use", "Set tag context filter", cmd_use},
+    {"say", "Print text to console", cmd_say},
+    {"edit", "Open text editor", cmd_edit},
+    {"info", "Show system information", cmd_info},
+    {"whoami", "Show current user", cmd_whoami},
+    {"login", "Login as user", cmd_login},
+    {"reboot", "Reboot the system", cmd_reboot},
     {"byebye", "Shutdown system", cmd_byebye},
-    {"ls", "List files", cmd_ls},
     {NULL, NULL, NULL}  // Sentinel
 };
 
@@ -67,7 +91,11 @@ static shell_command_t commands[] = {
 // ============================================================================
 
 static void shell_print_prompt(void) {
-    kprintf("%[H]%s@boxos%[D]:%[S]~%[D]$ ", current_user);
+    if (current_user_is_admin) {
+        kprintf("%[E]%s@boxos%[D]:%[S]~%[D]# ", current_user);
+    } else {
+        kprintf("%[H]%s@boxos%[D]:%[S]~%[D]$ ", current_user);
+    }
 }
 
 static int shell_parse_command(char* input, char** argv) {
@@ -175,8 +203,72 @@ int cmd_help(int argc, char** argv) {
         kprintf("  %[H]%-12s%[D] - %s\n", commands[i].name, commands[i].description);
     }
 
+    kprintf("\n%[H]Tip:%[D] Files are managed with tags, not directories!\n");
+    kprintf("Example: create myfile.txt --data \"Hello!\" type:text\n");
     kprintf("\n");
     return 0;
+}
+
+// ============================================================================
+// COMMAND: clear
+// ============================================================================
+
+int cmd_clear(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
+
+    vga_clear_screen();
+    return 0;
+}
+
+// ============================================================================
+// COMMAND: whoami
+// ============================================================================
+
+int cmd_whoami(int argc, char** argv) {
+    (void)argc;
+    (void)argv;
+
+    kprintf("%s", current_user);
+    if (current_user_is_admin) {
+        kprintf(" (administrator)");
+    }
+    kprintf("\n");
+    return 0;
+}
+
+// ============================================================================
+// COMMAND: login
+// ============================================================================
+
+int cmd_login(int argc, char** argv) {
+    if (argc < 3) {
+        kprintf("Usage: login <username> <password>\n");
+        kprintf("\nAvailable users:\n");
+        for (int i = 0; users[i].username[0] != '\0'; i++) {
+            kprintf("  - %s %s\n", users[i].username,
+                    users[i].is_admin ? "(admin)" : "(user)");
+        }
+        return -1;
+    }
+
+    // Find user
+    for (int i = 0; users[i].username[0] != '\0'; i++) {
+        if (strcmp(argv[1], users[i].username) == 0) {
+            if (strcmp(argv[2], users[i].password) == 0) {
+                strncpy(current_user, users[i].username, 31);
+                current_user_is_admin = users[i].is_admin;
+                kprintf("%[S]Login successful! Welcome, %s.%[D]\n", current_user);
+                return 0;
+            } else {
+                kprintf("%[E]Incorrect password%[D]\n");
+                return -1;
+            }
+        }
+    }
+
+    kprintf("%[E]User not found%[D]\n");
+    return -1;
 }
 
 // ============================================================================
@@ -277,6 +369,7 @@ int cmd_ls(int argc, char** argv) {
 int cmd_create(int argc, char** argv) {
     if (argc < 2) {
         kprintf("Usage: create <name> [--data <text>] [tag:value ...]\n");
+        kprintf("Example: create file.txt --data \"Hello!\" type:text\n");
         return -1;
     }
 
@@ -287,10 +380,15 @@ int cmd_create(int argc, char** argv) {
     uint32_t tag_count = 0;
 
     // Add name tag
-    tags[tag_count].key[0] = '\0';
-    tags[tag_count].value[0] = '\0';
+    memset(&tags[tag_count], 0, sizeof(Tag));
     strncpy(tags[tag_count].key, "name", TAGFS_TAG_KEY_SIZE);
     strncpy(tags[tag_count].value, name, TAGFS_TAG_VALUE_SIZE);
+    tag_count++;
+
+    // Add owner tag
+    memset(&tags[tag_count], 0, sizeof(Tag));
+    strncpy(tags[tag_count].key, "owner", TAGFS_TAG_KEY_SIZE);
+    strncpy(tags[tag_count].value, current_user, TAGFS_TAG_VALUE_SIZE);
     tag_count++;
 
     // Parse remaining arguments
@@ -303,8 +401,7 @@ int cmd_create(int argc, char** argv) {
             char* colon = strchr(argv[i], ':');
             if (colon && tag_count < TAGFS_MAX_TAGS_PER_FILE) {
                 *colon = '\0';
-                tags[tag_count].key[0] = '\0';
-                tags[tag_count].value[0] = '\0';
+                memset(&tags[tag_count], 0, sizeof(Tag));
                 strncpy(tags[tag_count].key, argv[i], TAGFS_TAG_KEY_SIZE);
                 strncpy(tags[tag_count].value, colon + 1, TAGFS_TAG_VALUE_SIZE);
                 tag_count++;
@@ -402,14 +499,18 @@ int cmd_erase(int argc, char** argv) {
         return -1;
     }
 
+    // Check permissions
+    if (!current_user_is_admin) {
+        kprintf("%[E]Permission denied: Only administrators can permanently erase files%[D]\n");
+        kprintf("Use 'trash' instead to move file to trash.\n");
+        return -1;
+    }
+
     uint64_t inode_id = tagfs_find_by_name(argv[1]);
     if (inode_id == TAGFS_INVALID_INODE) {
         kprintf("%[E]File not found: %s%[D]\n", argv[1]);
         return -1;
     }
-
-    kprintf("%[W]Are you sure you want to permanently delete '%s'? (y/n): %[D]", argv[1]);
-    kprintf("y\n");  // Auto-yes for now (TODO: add keyboard input)
 
     if (tagfs_erase_file(inode_id) != 0) {
         kprintf("%[E]Failed to erase file%[D]\n");
@@ -536,7 +637,7 @@ int cmd_use(int argc, char** argv) {
         return -1;
     }
 
-    kprintf("%[S]Context set to: %[D]", "");
+    kprintf("%[S]Context set to: %[D]");
     for (uint32_t i = 0; i < tag_count; i++) {
         kprintf("%s:%s ", tags[i].key, tags[i].value);
     }
@@ -576,7 +677,8 @@ int cmd_info(int argc, char** argv) {
             global_tagfs.superblock->total_blocks);
 
     // User info
-    kprintf("User: %s\n", current_user);
+    kprintf("User: %s %s\n", current_user,
+            current_user_is_admin ? "(administrator)" : "(standard user)");
     kprintf("Shell: BoxOS Shell v2.0\n");
 
     kprintf("\n");
@@ -616,6 +718,11 @@ int cmd_reboot(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
+    if (!current_user_is_admin) {
+        kprintf("%[E]Permission denied: Only administrators can reboot the system%[D]\n");
+        return -1;
+    }
+
     kprintf("\n%[W]Rebooting system...%[D]\n\n");
 
     // Wait a moment
@@ -640,7 +747,12 @@ int cmd_byebye(int argc, char** argv) {
     (void)argc;
     (void)argv;
 
-    kprintf("\n%[H]Thank you for using BoxOS!%[D]\n");
+    if (!current_user_is_admin) {
+        kprintf("%[E]Permission denied: Only administrators can shutdown the system%[D]\n");
+        return -1;
+    }
+
+    kprintf("\n%[H]Thank you for using BoxOS, %s!%[D]\n", current_user);
     kprintf("%[S]Shutting down...%[D]\n\n");
 
     // Wait a moment
