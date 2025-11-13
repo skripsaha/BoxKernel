@@ -301,7 +301,25 @@ int cmd_ls(int argc, char** argv) {
     extern TagFSContext global_tagfs;
     uint32_t file_count = 0;
 
-    for (uint64_t i = 1; i < global_tagfs.superblock->total_inodes; i++) {
+    // Safety checks
+    if (!global_tagfs.inode_table) {
+        kprintf("%[E]ERROR: Inode table not initialized!%[D]\n");
+        return -1;
+    }
+
+    if (!global_tagfs.superblock) {
+        kprintf("%[E]ERROR: Superblock not initialized!%[D]\n");
+        return -1;
+    }
+
+    uint64_t max_inodes = global_tagfs.superblock->total_inodes;
+    if (max_inodes > TAGFS_MAX_FILES) {
+        kprintf("%[W]WARNING: total_inodes (%lu) exceeds max, capping to %u%[D]\n",
+                max_inodes, TAGFS_MAX_FILES);
+        max_inodes = TAGFS_MAX_FILES;
+    }
+
+    for (uint64_t i = 1; i < max_inodes; i++) {
         FileInode* inode = &global_tagfs.inode_table[i];
 
         // Skip empty inodes

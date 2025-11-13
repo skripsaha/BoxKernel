@@ -551,19 +551,21 @@ void tagfs_init(void) {
 
         tagfs_storage = (uint8_t (*)[TAGFS_BLOCK_SIZE])vmalloc(storage_size);
         if (!tagfs_storage) {
-            kprintf("[TAGFS] ERROR: Failed to allocate storage!\n");
+            panic("[TAGFS] FATAL: Failed to allocate storage!\n");
             return;
         }
 
         // Zero out the storage
         memset(tagfs_storage, 0, storage_size);
-        kprintf("[TAGFS] Storage allocated at %p\n", tagfs_storage);
+        kprintf("[TAGFS] Storage allocated at %p\n", (void*)tagfs_storage);
     }
 
     memset(&global_tagfs, 0, sizeof(TagFSContext));
 
-    // Allocate superblock in memory
-    global_tagfs.superblock = (TagFSSuperblock*)tagfs_storage[0];
+    // Allocate superblock in memory - CRITICAL: This must point to tagfs_storage[0]
+    global_tagfs.superblock = (TagFSSuperblock*)&tagfs_storage[0][0];
+    kprintf("[TAGFS] Superblock at %p (storage[0]=%p)\n",
+            (void*)global_tagfs.superblock, (void*)&tagfs_storage[0][0]);
 
     // Проверяем наличие ATA диска
     int disk_available = 0;
@@ -605,16 +607,35 @@ void tagfs_init(void) {
         kprintf("[TAGFS] Creating new filesystem...\n");
         tagfs_format(TAGFS_MEM_BLOCKS);
 
-        // DON'T sync to disk - it's causing corruption!
-        // Just use memory mode for now
-        if (disk_available) {
-            kprintf("[TAGFS] SKIPPING disk sync to avoid corruption\n");
-            tagfs_set_disk_mode(0);  // Disable disk mode temporarily
+        // Try to sync to disk if available
+        if (disk_available && use_disk) {
+            kprintf("[TAGFS] Syncing new filesystem to disk...\n");
+            if (tagfs_sync() != 0) {
+                kprintf("[TAGFS] WARNING: Disk sync failed, using memory-only mode\n");
+                tagfs_set_disk_mode(0);
+            } else {
+                kprintf("[TAGFS] Successfully synced to disk\n");
+            }
         }
     }
 
-    // Setup inode table (starts at block 1)
-    global_tagfs.inode_table = (FileInode*)tagfs_storage[global_tagfs.superblock->inode_table_block];
+    // Validate superblock before accessing fields
+    if (global_tagfs.superblock->magic != TAGFS_MAGIC) {
+        panic("[TAGFS] FATAL: Invalid superblock magic after init!");
+    }
+
+    // Validate inode_table_block
+    if (global_tagfs.superblock->inode_table_block == 0 ||
+        global_tagfs.superblock->inode_table_block >= TAGFS_MEM_BLOCKS) {
+        panic("[TAGFS] FATAL: Invalid inode_table_block: %lu",
+              global_tagfs.superblock->inode_table_block);
+    }
+
+    // Setup inode table - use explicit pointer arithmetic
+    global_tagfs.inode_table = (FileInode*)&tagfs_storage[global_tagfs.superblock->inode_table_block][0];
+    kprintf("[TAGFS] Inode table at %p (block %lu)\n",
+            (void*)global_tagfs.inode_table,
+            global_tagfs.superblock->inode_table_block);
 
     // Allocate bitmaps
     uint64_t block_bitmap_size = (global_tagfs.superblock->total_blocks + 7) / 8;
