@@ -605,14 +605,19 @@ void tagfs_init(void) {
         kprintf("[TAGFS] Creating new filesystem...\n");
         tagfs_format(TAGFS_MEM_BLOCKS);
 
-        // Если диск доступен, записываем новую ФС на диск
+        kprintf("[TAGFS] DEBUG: After format, superblock values:\n");
+        kprintf("[TAGFS] DEBUG:   magic=0x%lx\n", global_tagfs.superblock->magic);
+        kprintf("[TAGFS] DEBUG:   inode_table_block=%lu\n", global_tagfs.superblock->inode_table_block);
+        kprintf("[TAGFS] DEBUG:   tag_index_block=%lu\n", global_tagfs.superblock->tag_index_block);
+        kprintf("[TAGFS] DEBUG:   data_blocks_start=%lu\n", global_tagfs.superblock->data_blocks_start);
+        kprintf("[TAGFS] DEBUG:   total_blocks=%lu\n", global_tagfs.superblock->total_blocks);
+        kprintf("[TAGFS] DEBUG:   total_inodes=%lu\n", global_tagfs.superblock->total_inodes);
+
+        // DON'T sync to disk - it's causing corruption!
+        // Just use memory mode for now
         if (disk_available) {
-            kprintf("[TAGFS] Writing new filesystem to disk...\n");
-            if (tagfs_sync() == 0) {
-                kprintf("[TAGFS] Filesystem synced to disk successfully!\n");
-            } else {
-                kprintf("[TAGFS] WARNING: Failed to sync filesystem to disk\n");
-            }
+            kprintf("[TAGFS] SKIPPING disk sync to avoid corruption\n");
+            tagfs_set_disk_mode(0);  // Disable disk mode temporarily
         }
     }
 
