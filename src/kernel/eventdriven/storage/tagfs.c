@@ -10,7 +10,8 @@ TagFSContext global_tagfs;
 
 // Простое хранилище блоков в памяти (fallback если диск недоступен)
 #define TAGFS_MEM_BLOCKS 128  // 512MB виртуального диска (128 * 4KB)
-static uint8_t tagfs_storage[TAGFS_MEM_BLOCKS][TAGFS_BLOCK_SIZE];
+// Use pointer instead of static array to avoid BSS allocation
+static uint8_t (*tagfs_storage)[TAGFS_BLOCK_SIZE] = NULL;
 
 // Использовать реальный диск или память?
 static int use_disk = 0;  // 0 = память, 1 = диск
@@ -542,6 +543,22 @@ int tagfs_tag_equal(const Tag* a, const Tag* b) {
 
 void tagfs_init(void) {
     kprintf("[TAGFS] Initializing tag-based filesystem...\n");
+
+    // Allocate storage in kernel heap (high memory) instead of BSS (low memory)
+    if (!tagfs_storage) {
+        size_t storage_size = TAGFS_MEM_BLOCKS * TAGFS_BLOCK_SIZE;
+        kprintf("[TAGFS] Allocating %lu KB for filesystem storage...\n", storage_size / 1024);
+
+        tagfs_storage = (uint8_t (*)[TAGFS_BLOCK_SIZE])vmalloc(storage_size);
+        if (!tagfs_storage) {
+            kprintf("[TAGFS] ERROR: Failed to allocate storage!\n");
+            return;
+        }
+
+        // Zero out the storage
+        memset(tagfs_storage, 0, storage_size);
+        kprintf("[TAGFS] Storage allocated at %p\n", tagfs_storage);
+    }
 
     memset(&global_tagfs, 0, sizeof(TagFSContext));
 
