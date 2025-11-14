@@ -42,15 +42,25 @@ const char* vmm_get_last_error(void) {
 
 // ========== PHYSICAL MEMORY INTEGRATION ==========
 uintptr_t vmm_alloc_page_table(void) {
-    void* page = pmm_alloc_zero(1);  // One page, zero-initialized (returns phys pointer)
-    if (!page) {
+    // PMM returns PHYSICAL address
+    void* phys_page = pmm_alloc(1);  // Returns physical address
+    if (!phys_page) {
         vmm_set_error("Failed to allocate page table from PMM");
         return 0;
     }
+
+    // Convert to virtual address for accessing the page table
+    void* virt_page = vmm_phys_to_virt((uintptr_t)phys_page);
+
+    // Zero the page using virtual address
+    memset(virt_page, 0, VMM_PAGE_SIZE);
+
     spin_lock(&vmm_global_lock);
     global_stats.page_tables_allocated++;
     spin_unlock(&vmm_global_lock);
-    return (uintptr_t)page;
+
+    // Return PHYSICAL address (page tables need physical addresses in PTEs)
+    return (uintptr_t)phys_page;
 }
 
 void vmm_free_page_table(uintptr_t phys_addr) {
@@ -184,7 +194,7 @@ vmm_context_t* vmm_create_context(void) {
 
     memset(ctx, 0, sizeof(vmm_context_t));
 
-    // Allocate PML4 table
+    // Allocate PML4 table (returns PHYSICAL address)
     uintptr_t pml4_phys = vmm_alloc_page_table();
     if (!pml4_phys) {
         kfree(ctx);
@@ -192,7 +202,8 @@ vmm_context_t* vmm_create_context(void) {
         return NULL;
     }
 
-    ctx->pml4 = (page_table_t*)pml4_phys;
+    // Convert physical address to virtual for accessing page table
+    ctx->pml4 = (page_table_t*)vmm_phys_to_virt(pml4_phys);
     ctx->pml4_phys = pml4_phys;
     ctx->heap_start = VMM_USER_HEAP_BASE;
     ctx->heap_end = VMM_USER_HEAP_BASE;
@@ -868,24 +879,68 @@ void vmm_init(void) {
     kprintf("[VMM] Kernel context created at %p\n", kernel_context);
     kprintf("[VMM] PML4 physical address: 0x%p\n", (void*)kernel_context->pml4_phys);
 
-    // Set up identity mapping for first 256MB
-    // CRITICAL: VMM relies on physical = virtual for page table access!
-    // PMM can allocate memory anywhere in physical RAM, so we need enough
-    // identity mapping to cover all possible allocations.
-    // 256MB should be sufficient for QEMU with 512MB RAM
-    kprintf("[VMM] Setting up identity mapping for first 256MB (CRITICAL for VMM)...\n");
+    // ========== CRITICAL: Set up higher-half direct mapping ==========
+    // Map ALL physical memory to higher-half (0xFFFF888000000000+)
+    // This allows safe access to physical memory anywhere in RAM!
+    //
+    // Physical memory layout after this:
+    //   Physical 0x00000000 → Virtual 0xFFFF888000000000
+    //   Physical 0x10000000 → Virtual 0xFFFF888010000000
+    //   etc.
+    //
+    // This replaces the fragile identity mapping approach.
+
+    kprintf("[VMM] Setting up higher-half direct mapping (0x%p)...\n",
+            (void*)VMM_PHYS_MAP_BASE);
+
+    // Determine how much physical memory to map
+    // We'll map the first 64GB (or less if less RAM available)
+    size_t total_phys_mem = pmm_total_pages() * PMM_PAGE_SIZE;
+    size_t phys_to_map = total_phys_mem;
+    if (phys_to_map > VMM_PHYS_MAP_SIZE) {
+        phys_to_map = VMM_PHYS_MAP_SIZE;
+    }
+
+    kprintf("[VMM] Physical memory detected: %zu MB\n", total_phys_mem / (1024 * 1024));
+    kprintf("[VMM] Mapping %zu MB to higher-half...\n", phys_to_map / (1024 * 1024));
+
+    size_t direct_map_pages = 0;
+    size_t failed_pages = 0;
+
+    // Map physical memory to higher-half
+    for (uintptr_t phys = 0; phys < phys_to_map; phys += VMM_PAGE_SIZE) {
+        uintptr_t virt = VMM_PHYS_MAP_BASE + phys;
+        vmm_map_result_t result = vmm_map_page(kernel_context, virt, phys, VMM_FLAGS_KERNEL_RW);
+
+        if (result.success) {
+            direct_map_pages++;
+        } else {
+            failed_pages++;
+            // Only warn for first 16MB (critical region)
+            if (phys < 0x1000000) {
+                kprintf("[VMM] WARNING: Failed to map phys 0x%p → virt 0x%p: %s\n",
+                       (void*)phys, (void*)virt, result.error_msg);
+            }
+        }
+    }
+
+    kprintf("[VMM] Higher-half direct mapping complete!\n");
+    kprintf("[VMM]   Mapped: %zu pages (%zu MB)\n",
+           direct_map_pages, (direct_map_pages * VMM_PAGE_SIZE) / (1024 * 1024));
+    if (failed_pages > 0) {
+        kprintf("[VMM]   Failed: %zu pages\n", failed_pages);
+    }
+
+    // Also keep identity mapping for first 16MB for bootstrap compatibility
+    kprintf("[VMM] Setting up identity mapping for first 16MB (bootstrap)...\n");
     size_t identity_pages = 0;
-    for (uintptr_t addr = 0; addr < 0x10000000; addr += VMM_PAGE_SIZE) { // 256MB
+    for (uintptr_t addr = 0; addr < 0x1000000; addr += VMM_PAGE_SIZE) { // 16MB
         vmm_map_result_t result = vmm_map_page(kernel_context, addr, addr, VMM_FLAGS_KERNEL_RW);
         if (result.success) {
             identity_pages++;
-        } else if (addr < 0x1000000) { // First 16MB is critical
-            kprintf("[VMM] CRITICAL: Failed to identity map 0x%p: %s\n",
-                   (void*)addr, result.error_msg);
         }
     }
-    kprintf("[VMM] Identity mapped %zu pages (0x%p bytes)\n",
-           identity_pages, (void*)(identity_pages * VMM_PAGE_SIZE));
+    kprintf("[VMM] Identity mapped %zu pages for bootstrap\n", identity_pages);
 
     kprintf("[VMM] Kernel heap will be mapped on demand starting at 0x%p\n",
            (void*)VMM_KERNEL_HEAP_BASE);

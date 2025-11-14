@@ -97,10 +97,10 @@ check-deps:
 	@command -v $(ASM) >/dev/null || (echo "ERROR: nasm not found" && exit 1)
 	@command -v $(CC) >/dev/null || (echo "ERROR: gcc not found" && exit 1)
 	@command -v $(LD) >/dev/null || (echo "ERROR: ld not found" && exit 1)
-	@command -v $(QEMU) >/dev/null || (echo "ERROR: qemu not found" && exit 1)
-	@command -v xorriso >/dev/null || (echo "ERROR: xorriso not found" && exit 1)
-	@command -v VBoxManage >/dev/null || (echo "WARNING: VBoxManage not found" && sleep 2)
-	@echo "All dependencies OK."
+	@command -v $(QEMU) >/dev/null || echo "WARNING: qemu not found (needed for 'make run')"
+	@command -v xorriso >/dev/null || echo "WARNING: xorriso not found (needed for ISO)"
+	@command -v VBoxManage >/dev/null || echo "WARNING: VBoxManage not found (optional)"
+	@echo "Build dependencies OK."
 
 # ==== BUILD RULES ====
 $(BUILDDIR):
