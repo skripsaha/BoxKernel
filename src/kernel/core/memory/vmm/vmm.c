@@ -114,8 +114,10 @@ page_table_t* vmm_get_or_create_table(vmm_context_t* ctx, uintptr_t virt_addr, i
         }
 
         // Move to next level (phys -> virtual pointer)
+        // CRITICAL: Using vmm_phys_to_virt() to convert physical to virtual
+        // Currently relies on identity mapping (0-2GB), future: proper higher-half mapping
         uintptr_t next_table_phys = vmm_pte_to_phys(*entry);
-        current_table = (page_table_t*)next_table_phys;
+        current_table = (page_table_t*)vmm_phys_to_virt(next_table_phys);
     }
 
     return current_table;
@@ -134,7 +136,7 @@ static pte_t* vmm_get_pte_noalloc(vmm_context_t* ctx, uintptr_t virt_addr) {
     pte_t pml4_entry = pml4->entries[pml4_idx];
     if (!(pml4_entry & VMM_FLAG_PRESENT)) return NULL;
 
-    page_table_t* pdpt = (page_table_t*)vmm_pte_to_phys(pml4_entry);
+    page_table_t* pdpt = (page_table_t*)vmm_phys_to_virt(vmm_pte_to_phys(pml4_entry));
     pte_t pdpt_entry = pdpt->entries[pdpt_idx];
     if (!(pdpt_entry & VMM_FLAG_PRESENT)) return NULL;
 
@@ -144,7 +146,7 @@ static pte_t* vmm_get_pte_noalloc(vmm_context_t* ctx, uintptr_t virt_addr) {
         return NULL;
     }
 
-    page_table_t* pd = (page_table_t*)vmm_pte_to_phys(pdpt_entry);
+    page_table_t* pd = (page_table_t*)vmm_phys_to_virt(vmm_pte_to_phys(pdpt_entry));
     pte_t pd_entry = pd->entries[pd_idx];
     if (!(pd_entry & VMM_FLAG_PRESENT)) return NULL;
 
@@ -153,7 +155,7 @@ static pte_t* vmm_get_pte_noalloc(vmm_context_t* ctx, uintptr_t virt_addr) {
         return NULL;
     }
 
-    page_table_t* pt = (page_table_t*)vmm_pte_to_phys(pd_entry);
+    page_table_t* pt = (page_table_t*)vmm_phys_to_virt(vmm_pte_to_phys(pd_entry));
     return &pt->entries[pt_idx];
 }
 
@@ -222,7 +224,7 @@ static void vmm_free_user_space_tables(vmm_context_t* ctx) {
         pte_t pml4_entry = ctx->pml4->entries[p4];
         if (!(pml4_entry & VMM_FLAG_PRESENT)) continue;
 
-        page_table_t* pdpt = (page_table_t*)vmm_pte_to_phys(pml4_entry);
+        page_table_t* pdpt = (page_table_t*)vmm_phys_to_virt(vmm_pte_to_phys(pml4_entry));
 
         // iterate PDPT entries
         for (int p3 = 0; p3 < 512; p3++) {
@@ -237,7 +239,7 @@ static void vmm_free_user_space_tables(vmm_context_t* ctx) {
                 continue;
             }
 
-            page_table_t* pd = (page_table_t*)vmm_pte_to_phys(pdpt_entry);
+            page_table_t* pd = (page_table_t*)vmm_phys_to_virt(vmm_pte_to_phys(pdpt_entry));
 
             // iterate PD entries
             for (int p2 = 0; p2 < 512; p2++) {
@@ -252,7 +254,7 @@ static void vmm_free_user_space_tables(vmm_context_t* ctx) {
                     continue;
                 }
 
-                page_table_t* pt = (page_table_t*)vmm_pte_to_phys(pd_entry);
+                page_table_t* pt = (page_table_t*)vmm_phys_to_virt(vmm_pte_to_phys(pd_entry));
 
                 // iterate PT entries (leaf pages)
                 for (int p1 = 0; p1 < 512; p1++) {
@@ -866,10 +868,14 @@ void vmm_init(void) {
     kprintf("[VMM] Kernel context created at %p\n", kernel_context);
     kprintf("[VMM] PML4 physical address: 0x%p\n", (void*)kernel_context->pml4_phys);
 
-    // Set up identity mapping for first 64MB (conservative)
-    kprintf("[VMM] Setting up identity mapping for first 64MB...\n");
+    // Set up identity mapping for first 256MB
+    // CRITICAL: VMM relies on physical = virtual for page table access!
+    // PMM can allocate memory anywhere in physical RAM, so we need enough
+    // identity mapping to cover all possible allocations.
+    // 256MB should be sufficient for QEMU with 512MB RAM
+    kprintf("[VMM] Setting up identity mapping for first 256MB (CRITICAL for VMM)...\n");
     size_t identity_pages = 0;
-    for (uintptr_t addr = 0; addr < 0x4000000; addr += VMM_PAGE_SIZE) { // 64MB
+    for (uintptr_t addr = 0; addr < 0x10000000; addr += VMM_PAGE_SIZE) { // 256MB
         vmm_map_result_t result = vmm_map_page(kernel_context, addr, addr, VMM_FLAGS_KERNEL_RW);
         if (result.success) {
             identity_pages++;
@@ -948,7 +954,7 @@ void vmm_dump_page_tables(vmm_context_t* ctx, uintptr_t virt_addr) {
         return;
     }
 
-    page_table_t* pdpt = (page_table_t*)vmm_pte_to_phys(pml4_entry);
+    page_table_t* pdpt = (page_table_t*)vmm_phys_to_virt(vmm_pte_to_phys(pml4_entry));
     pte_t pdpt_entry = pdpt->entries[VMM_PDPT_INDEX(virt_addr)];
     kprintf("[VMM]   PDPT entry: 0x%016llx (present: %s)\n",
            (unsigned long long)pdpt_entry, (pdpt_entry & VMM_FLAG_PRESENT) ? "yes" : "no");
@@ -958,7 +964,7 @@ void vmm_dump_page_tables(vmm_context_t* ctx, uintptr_t virt_addr) {
         return;
     }
 
-    page_table_t* pd = (page_table_t*)vmm_pte_to_phys(pdpt_entry);
+    page_table_t* pd = (page_table_t*)vmm_phys_to_virt(vmm_pte_to_phys(pdpt_entry));
     pte_t pd_entry = pd->entries[VMM_PD_INDEX(virt_addr)];
     kprintf("[VMM]   PD entry:   0x%016llx (present: %s)\n",
            (unsigned long long)pd_entry, (pd_entry & VMM_FLAG_PRESENT) ? "yes" : "no");
@@ -975,7 +981,7 @@ void vmm_dump_page_tables(vmm_context_t* ctx, uintptr_t virt_addr) {
         return;
     }
 
-    page_table_t* pt = (page_table_t*)vmm_pte_to_phys(pd_entry);
+    page_table_t* pt = (page_table_t*)vmm_phys_to_virt(vmm_pte_to_phys(pd_entry));
     pte_t pt_entry = pt->entries[VMM_PT_INDEX(virt_addr)];
     kprintf("[VMM]   PT entry:   0x%016llx (present: %s)\n",
            (unsigned long long)pt_entry, (pt_entry & VMM_FLAG_PRESENT) ? "yes" : "no");

@@ -204,6 +204,35 @@ static inline pte_t vmm_make_pte(uintptr_t phys_addr, uint64_t flags) {
     return (phys_addr & VMM_PTE_ADDR_MASK) | (flags & VMM_PTE_FLAGS_MASK);
 }
 
+// ========== PHYSICAL ↔ VIRTUAL ADDRESS TRANSLATION ==========
+// CRITICAL: VMM/PMM architecture currently relies on identity mapping!
+// These functions convert between physical and virtual addresses.
+//
+// Current implementation: Uses identity mapping (physical = virtual for low memory)
+// Future improvement: Should use higher-half direct mapping (0xFFFF880000000000+)
+
+static inline void* vmm_phys_to_virt(uintptr_t phys_addr) {
+    // For now: rely on identity mapping
+    // Physical addresses 0-256MB are identity mapped (phys = virt)
+    // This works as long as all allocated memory is within identity mapped region
+    return (void*)phys_addr;
+}
+
+static inline uintptr_t vmm_virt_to_phys_direct(void* virt_addr) {
+    // For now: rely on identity mapping
+    // This is the inverse of vmm_phys_to_virt for identity-mapped addresses
+    uintptr_t virt = (uintptr_t)virt_addr;
+
+    // If address is in kernel space (higher half), it's not identity mapped
+    if (virt >= VMM_KERNEL_BASE) {
+        // Not supported yet - need proper higher-half mapping
+        return 0;
+    }
+
+    // Otherwise assume identity mapping
+    return virt;
+}
+
 // Page fault handling
 // Returns: 0 on success (handled), -1 on error (unhandled)
 int vmm_handle_page_fault(uintptr_t fault_addr, uint64_t error_code);
