@@ -49,10 +49,21 @@ uintptr_t vmm_alloc_page_table(void) {
         return 0;
     }
 
-    // Convert to virtual address for accessing the page table
-    void* virt_page = vmm_phys_to_virt((uintptr_t)phys_page);
+    uintptr_t phys = (uintptr_t)phys_page;
+    void* virt_page;
 
-    // Zero the page using virtual address
+    // CRITICAL: Choose correct virtual address based on VMM initialization state
+    if (!vmm_initialized) {
+        // BEFORE vmm_init(): Use identity mapping (phys = virt for low memory)
+        // This is safe because PMM allocates from low memory during early boot
+        virt_page = phys_page;
+    } else {
+        // AFTER vmm_init(): Use higher-half direct mapping
+        // Physical addr X → Virtual addr (VMM_PHYS_MAP_BASE + X)
+        virt_page = vmm_phys_to_virt(phys);
+    }
+
+    // Zero the page using appropriate virtual address
     memset(virt_page, 0, VMM_PAGE_SIZE);
 
     spin_lock(&vmm_global_lock);
@@ -60,7 +71,7 @@ uintptr_t vmm_alloc_page_table(void) {
     spin_unlock(&vmm_global_lock);
 
     // Return PHYSICAL address (page tables need physical addresses in PTEs)
-    return (uintptr_t)phys_page;
+    return phys;
 }
 
 void vmm_free_page_table(uintptr_t phys_addr) {
@@ -124,10 +135,16 @@ page_table_t* vmm_get_or_create_table(vmm_context_t* ctx, uintptr_t virt_addr, i
         }
 
         // Move to next level (phys -> virtual pointer)
-        // CRITICAL: Using vmm_phys_to_virt() to convert physical to virtual
-        // Currently relies on identity mapping (0-2GB), future: proper higher-half mapping
+        // CRITICAL: Choose correct virtual address based on VMM initialization state
         uintptr_t next_table_phys = vmm_pte_to_phys(*entry);
-        current_table = (page_table_t*)vmm_phys_to_virt(next_table_phys);
+
+        if (!vmm_initialized) {
+            // BEFORE vmm_init(): Use identity mapping
+            current_table = (page_table_t*)next_table_phys;
+        } else {
+            // AFTER vmm_init(): Use higher-half direct mapping
+            current_table = (page_table_t*)vmm_phys_to_virt(next_table_phys);
+        }
     }
 
     return current_table;
@@ -146,17 +163,26 @@ static pte_t* vmm_get_pte_noalloc(vmm_context_t* ctx, uintptr_t virt_addr) {
     pte_t pml4_entry = pml4->entries[pml4_idx];
     if (!(pml4_entry & VMM_FLAG_PRESENT)) return NULL;
 
-    page_table_t* pdpt = (page_table_t*)vmm_phys_to_virt(vmm_pte_to_phys(pml4_entry));
+    // Get PDPT (convert phys to virt based on VMM state)
+    uintptr_t pdpt_phys = vmm_pte_to_phys(pml4_entry);
+    page_table_t* pdpt = vmm_initialized ?
+        (page_table_t*)vmm_phys_to_virt(pdpt_phys) :
+        (page_table_t*)pdpt_phys;
+
     pte_t pdpt_entry = pdpt->entries[pdpt_idx];
     if (!(pdpt_entry & VMM_FLAG_PRESENT)) return NULL;
 
     // If PDPT entry is large page (1GB), then there's no lower PT
     if (pdpt_entry & VMM_FLAG_LARGE_PAGE) {
-        // No PT; represent as PTE not present here
         return NULL;
     }
 
-    page_table_t* pd = (page_table_t*)vmm_phys_to_virt(vmm_pte_to_phys(pdpt_entry));
+    // Get PD (convert phys to virt based on VMM state)
+    uintptr_t pd_phys = vmm_pte_to_phys(pdpt_entry);
+    page_table_t* pd = vmm_initialized ?
+        (page_table_t*)vmm_phys_to_virt(pd_phys) :
+        (page_table_t*)pd_phys;
+
     pte_t pd_entry = pd->entries[pd_idx];
     if (!(pd_entry & VMM_FLAG_PRESENT)) return NULL;
 
@@ -165,7 +191,12 @@ static pte_t* vmm_get_pte_noalloc(vmm_context_t* ctx, uintptr_t virt_addr) {
         return NULL;
     }
 
-    page_table_t* pt = (page_table_t*)vmm_phys_to_virt(vmm_pte_to_phys(pd_entry));
+    // Get PT (convert phys to virt based on VMM state)
+    uintptr_t pt_phys = vmm_pte_to_phys(pd_entry);
+    page_table_t* pt = vmm_initialized ?
+        (page_table_t*)vmm_phys_to_virt(pt_phys) :
+        (page_table_t*)pt_phys;
+
     return &pt->entries[pt_idx];
 }
 
@@ -203,7 +234,14 @@ vmm_context_t* vmm_create_context(void) {
     }
 
     // Convert physical address to virtual for accessing page table
-    ctx->pml4 = (page_table_t*)vmm_phys_to_virt(pml4_phys);
+    // CRITICAL: Choose correct virtual address based on VMM initialization state
+    if (!vmm_initialized) {
+        // BEFORE vmm_init(): Use identity mapping
+        ctx->pml4 = (page_table_t*)pml4_phys;
+    } else {
+        // AFTER vmm_init(): Use higher-half direct mapping
+        ctx->pml4 = (page_table_t*)vmm_phys_to_virt(pml4_phys);
+    }
     ctx->pml4_phys = pml4_phys;
     ctx->heap_start = VMM_USER_HEAP_BASE;
     ctx->heap_end = VMM_USER_HEAP_BASE;
