@@ -16,6 +16,12 @@
 #define VMM_USER_STACK_TOP      0x00007FFFFFFFE000ULL  // ~128TB user space top
 #define VMM_USER_HEAP_BASE      0x0000000001000000ULL  // 16MB user heap start
 
+// Higher-half direct mapping for physical memory (like Linux)
+// Physical address X is mapped to (VMM_PHYS_MAP_BASE + X)
+// This allows safe access to ALL physical memory through virtual addresses
+#define VMM_PHYS_MAP_BASE       0xFFFF888000000000ULL  // -119.5TB (direct map region)
+#define VMM_PHYS_MAP_SIZE       (64ULL << 30)          // 64GB physical memory support
+
 // Memory protection flags
 #define VMM_FLAG_PRESENT        (1ULL << 0)   // Page is present
 #define VMM_FLAG_WRITABLE       (1ULL << 1)   // Page is writable
@@ -205,32 +211,44 @@ static inline pte_t vmm_make_pte(uintptr_t phys_addr, uint64_t flags) {
 }
 
 // ========== PHYSICAL ↔ VIRTUAL ADDRESS TRANSLATION ==========
-// CRITICAL: VMM/PMM architecture currently relies on identity mapping!
-// These functions convert between physical and virtual addresses.
+// PROPER HIGHER-HALF DIRECT MAPPING IMPLEMENTATION
 //
-// Current implementation: Uses identity mapping (physical = virtual for low memory)
-// Future improvement: Should use higher-half direct mapping (0xFFFF880000000000+)
+// Physical memory is mapped to higher-half for safe kernel access:
+//   Physical addr X → Virtual addr (VMM_PHYS_MAP_BASE + X)
+//
+// This allows the kernel to safely access ALL physical memory without
+// relying on fragile identity mapping that only works for low addresses.
+//
+// Architecture (like Linux):
+//   0x0000000000000000 - 0x00007FFFFFFFFFFF : User space (128TB)
+//   0xFFFF800000000000 - 0xFFFF807FFFFFFFFF : Kernel heap (512GB)
+//   0xFFFF888000000000 - 0xFFFF888FFFFFFFFF : Direct map of phys mem (64GB)
+//   0xFFFF800000000000+                     : Kernel code/data
 
 static inline void* vmm_phys_to_virt(uintptr_t phys_addr) {
-    // For now: rely on identity mapping
-    // Physical addresses 0-256MB are identity mapped (phys = virt)
-    // This works as long as all allocated memory is within identity mapped region
-    return (void*)phys_addr;
+    // Convert physical address to higher-half virtual address
+    // Physical 0x1234 → Virtual 0xFFFF888000001234
+    return (void*)(VMM_PHYS_MAP_BASE + phys_addr);
 }
 
 static inline uintptr_t vmm_virt_to_phys_direct(void* virt_addr) {
-    // For now: rely on identity mapping
-    // This is the inverse of vmm_phys_to_virt for identity-mapped addresses
+    // Convert higher-half virtual address back to physical
     uintptr_t virt = (uintptr_t)virt_addr;
 
-    // If address is in kernel space (higher half), it's not identity mapped
-    if (virt >= VMM_KERNEL_BASE) {
-        // Not supported yet - need proper higher-half mapping
-        return 0;
+    // Check if this is in the direct-mapped region
+    if (virt >= VMM_PHYS_MAP_BASE && virt < (VMM_PHYS_MAP_BASE + VMM_PHYS_MAP_SIZE)) {
+        // Strip the offset to get physical address
+        return virt - VMM_PHYS_MAP_BASE;
     }
 
-    // Otherwise assume identity mapping
-    return virt;
+    // Check if it's identity mapped (backwards compatibility for boot)
+    if (virt < VMM_PHYS_MAP_SIZE) {
+        // Low addresses might still be identity mapped during boot
+        return virt;
+    }
+
+    // Not a directly mappable address - would need page table walk
+    return 0;
 }
 
 // Page fault handling

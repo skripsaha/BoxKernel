@@ -78,11 +78,21 @@ void pmm_init(void) {
     size_t bitmap_size = (pmm_zone.pages + 7) / 8;
     kprintf("[PMM] Bitmap size = %d bytes\n", (int)bitmap_size);
 
-    // Place bitmap at the end of RAM
-    // pmm_zone.bitmap = (uint8_t*)(mem_end - bitmap_size);
-    // kprintf("[PMM] Bitmap placed at %p\n", pmm_zone.bitmap);
+    // Place bitmap after kernel
     pmm_zone.bitmap = (uint8_t*)ALIGN_UP((uintptr_t)&_kernel_end, 4096);
     kprintf("[PMM] Bitmap placed at %p (after kernel)\n", pmm_zone.bitmap);
+
+    // CRITICAL: Ensure bitmap is in identity-mapped region (first 16MB)
+    // PMM is initialized BEFORE VMM, so we only have identity mapping!
+    // The bitmap must be accessible during early boot.
+    uintptr_t bitmap_end = (uintptr_t)pmm_zone.bitmap + bitmap_size;
+
+    if (bitmap_end > 0x1000000) {  // 16MB limit
+        panic("[PMM] CRITICAL: Bitmap extends beyond identity-mapped region!\n"
+              "       Bitmap: %p - %p (size: %d KB)\n"
+              "       This kernel is too large. Reduce kernel size or increase identity mapping.",
+              pmm_zone.bitmap, (void*)bitmap_end, (int)(bitmap_size / 1024));
+    }
 
     // Ensure the bitmap is within managed range
     if ((uintptr_t)pmm_zone.bitmap < pmm_zone.base) {
@@ -207,9 +217,31 @@ void* pmm_alloc(size_t pages) {
 }
 
 void* pmm_alloc_zero(size_t pages) {
-    void* addr = pmm_alloc(pages);
-    if (addr) memset(addr, 0, pages * PMM_PAGE_SIZE);
-    return addr;
+    // Allocate physical pages
+    void* phys_addr = pmm_alloc(pages);
+    if (!phys_addr) return NULL;
+
+    // CRITICAL: Cannot directly access physical memory!
+    // We need to convert physical address to virtual address first.
+    // This function is problematic and should not be used after VMM init.
+    // Instead, use pmm_alloc() + memset via vmm_phys_to_virt()
+
+    // For now, check if we're in early boot (identity mapped region)
+    uintptr_t phys = (uintptr_t)phys_addr;
+
+    if (phys < 0x1000000) {  // First 16MB is identity mapped
+        // Safe to access directly during early boot
+        memset(phys_addr, 0, pages * PMM_PAGE_SIZE);
+    } else {
+        // After VMM init, physical memory is accessible via higher-half mapping
+        // Physical addr X → Virtual addr (0xFFFF888000000000 + X)
+        // We can't include vmm.h here (circular dependency), so we hardcode the offset
+        #define PHYS_MAP_BASE 0xFFFF888000000000ULL
+        void* virt_addr = (void*)(PHYS_MAP_BASE + phys);
+        memset(virt_addr, 0, pages * PMM_PAGE_SIZE);
+    }
+
+    return phys_addr;
 }
 
 void pmm_free(void* addr, size_t pages) {
